@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+    .react-flow.canvas-cursor-default .react-flow__pane {
+        @apply cursor-default;
+    }
+
+    .react-flow.canvas-cursor-multi-select .react-flow__pane,
+    .react-flow.canvas-cursor-multi-select .react-flow__node {
+        cursor: crosshair !important;
+    }
+
+    /* Resize geometry must not lag behind the pointer's position. */
+    .react-flow.nodes-animated .react-flow__node:not(.react-flow__node-area):not(.react-flow__node-note):not(.resizing) {
+        @apply transition-[width];
+        @apply duration-100;
+    }
+
+    .monaco-editor .monaco-editor-overlaymessage {
+        @apply hidden !important;
+    }
+
+    .marker-definitions {
+    }
+
+    .nodrag {
+    }
+}

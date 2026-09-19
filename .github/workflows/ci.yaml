@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # The production Vite build exceeds Node's default ~2 GB heap on the
+      # hosted Ubuntu runner. Keep this explicit so the PR and release paths
+      # validate the same build rather than failing before KeepERD checks run.
+      NODE_OPTIONS: --max-old-space-size=4096
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 24.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+    
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096 --localstorage-file=${{ runner.temp }}/chartdb-localstorage
+        run: npm run test:ci
+
+      - name: Run KeepERD CLI tests
+        run: npm run local:test:cli
+
+      - name: Build KeepERD local app
+        run: npm run local:build
+
+      - name: Create KeepERD release bundle
+        run: npm run keeperd:bundle -- --output-directory=release
+
+      - name: Verify KeepERD release checksum
+        working-directory: release
+        run: sha256sum --check keeperd-v*.tar.gz.sha256

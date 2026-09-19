@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="ko">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>저장된 ERD 관리 · KeepERD</title>
+        <style>
+            :root {
+                color-scheme: dark;
+                font:
+                    14px system-ui,
+                    sans-serif;
+                background: #0b1120;
+                color: #e2e8f0;
+            }
+            body {
+                margin: 0;
+                min-height: 100vh;
+                background: radial-gradient(
+                    ellipse at 50% 0%,
+                    #25214a80,
+                    transparent 65%
+                );
+            }
+            main {
+                max-width: 1000px;
+                margin: auto;
+                padding: 40px 24px 64px;
+            }
+            a {
+                color: #a5b4fc;
+                text-decoration: none;
+            }
+            a:hover {
+                text-decoration: underline;
+            }
+            header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 20px;
+            }
+            .eyebrow {
+                color: #a5b4fc;
+                letter-spacing: 2px;
+                font-size: 11px;
+            }
+            h1 {
+                font-size: 28px;
+                letter-spacing: -0.8px;
+                margin: 10px 0;
+            }
+            p {
+                color: #94a3b8;
+                line-height: 1.7;
+            }
+            .panel {
+                background: #111c30;
+                border: 1px solid #334155;
+                border-radius: 16px;
+                padding: 22px;
+                margin: 22px 0;
+            }
+            .filters {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1.3fr;
+                gap: 16px;
+            }
+            label {
+                display: block;
+                font-size: 13px;
+                color: #cbd5e1;
+            }
+            input,
+            select,
+            button {
+                font: inherit;
+                box-sizing: border-box;
+            }
+            select,
+            input[type='search'] {
+                width: 100%;
+                margin-top: 8px;
+                padding: 12px;
+                border: 1px solid #364152;
+                border-radius: 9px;
+                background: #0b1425;
+                color: #e2e8f0;
+            }
+            button,
+            .button {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                padding: 10px 14px;
+                border: 1px solid #475569;
+                border-radius: 9px;
+                background: #172131;
+                color: #e2e8f0;
+                cursor: pointer;
+            }
+            button:hover:not(:disabled) {
+                background: #263453;
+            }
+            button:disabled {
+                opacity: 0.45;
+                cursor: not-allowed;
+            }
+            .danger {
+                color: #fda4af;
+                border-color: #9f405b;
+                background: #3b1929;
+            }
+            .loading::before {
+                width: 14px;
+                height: 14px;
+                content: '';
+                border: 2px solid #ffffff55;
+                border-top-color: currentColor;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            }
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+            .toolbar {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 14px;
+                flex-wrap: wrap;
+            }
+            .storage-explainer {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 10px;
+                margin: 16px 0 18px;
+            }
+            .storage-explainer div {
+                padding: 13px 14px;
+                border: 1px solid #334155;
+                border-radius: 10px;
+                background: #0b1425;
+            }
+            .storage-explainer strong,
+            .storage-explainer span {
+                display: block;
+            }
+            .storage-explainer span {
+                margin-top: 5px;
+                color: #94a3b8;
+                font-size: 12px;
+                line-height: 1.6;
+            }
+            .toolbar-actions {
+                display: flex;
+                gap: 10px;
+            }
+            .toolbar label,
+            .select-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            input[type='checkbox'] {
+                accent-color: #818cf8;
+                width: 17px;
+                height: 17px;
+                flex: none;
+            }
+            .cards {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 16px;
+            }
+            article {
+                padding: 20px;
+                border: 1px solid #334155;
+                border-radius: 14px;
+                background: #111c30;
+            }
+            article:has(input:checked) {
+                border-color: #818cf8;
+                background: #17203a;
+            }
+            .card-owner {
+                font-size: 12px;
+                color: #a5b4fc;
+                overflow-wrap: anywhere;
+            }
+            h2 {
+                font-size: 18px;
+                margin: 10px 0;
+                overflow-wrap: anywhere;
+            }
+            .meta {
+                color: #94a3b8;
+                font-size: 12px;
+                line-height: 1.8;
+            }
+            .card-links {
+                display: flex;
+                gap: 14px;
+                align-items: center;
+                margin-top: 18px;
+            }
+            .open {
+                background: #4f46e5;
+                color: white;
+                border-color: #4f46e5;
+            }
+            .tag {
+                display: inline-block;
+                font-size: 11px;
+                padding: 3px 7px;
+                border: 1px solid #475569;
+                border-radius: 6px;
+                margin-right: 6px;
+                color: #c7d2fe;
+            }
+            #status {
+                min-height: 22px;
+                color: #cbd5e1;
+            }
+            #status.error {
+                color: #fda4af;
+            }
+            #status.success {
+                color: #86efac;
+            }
+            .dialog-backdrop {
+                position: fixed;
+                inset: 0;
+                z-index: 100;
+                display: grid;
+                place-items: center;
+                padding: 24px;
+                background: #030712cc;
+                backdrop-filter: blur(3px);
+            }
+            .dialog-card {
+                width: min(520px, 100%);
+                max-height: calc(100vh - 48px);
+                overflow: auto;
+                padding: 24px;
+                border: 1px solid #475569;
+                border-radius: 16px;
+                background: #111c30;
+                box-shadow: 0 24px 80px #000a;
+            }
+            .dialog-card h2 {
+                margin-top: 0;
+            }
+            .dialog-targets {
+                max-height: 150px;
+                overflow: auto;
+                padding: 12px 14px;
+                border: 1px solid #334155;
+                border-radius: 9px;
+                background: #0b1425;
+                color: #cbd5e1;
+                font-size: 12px;
+                line-height: 1.7;
+                white-space: pre-wrap;
+            }
+            .dialog-warning {
+                color: #fda4af;
+            }
+            .dialog-actions {
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+                margin-top: 20px;
+            }
+            .empty {
+                grid-column: 1/-1;
+                border: 1px dashed #334155;
+                border-radius: 14px;
+                padding: 40px 20px;
+                text-align: center;
+                color: #94a3b8;
+            }
+            footer {
+                font-size: 12px;
+                color: #64748b;
+                margin-top: 24px;
+                line-height: 1.8;
+            }
+            :focus-visible {
+                outline: 2px solid #a5b4fc;
+                outline-offset: 3px;
+            }
+            [hidden] {
+                display: none !important;
+            }
+            @media (max-width: 640px) {
+                main {
+                    padding: 28px 16px;
+                }
+                .filters,
+                .cards,
+                .storage-explainer {
+                    grid-template-columns: 1fr;
+                }
+                header {
+                    align-items: flex-start;
+                }
+                h1 {
+                    font-size: 23px;
+                }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                .loading::before {
+                    animation: none;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <main>
+            <header>
+                <div>
+                    <div class="eyebrow">KEEPERD · LOCAL LIBRARY</div>
+                    <h1>저장된 ERD 관리</h1>
+                </div>
+                <a class="button" href="/">← Sync 화면</a>
+            </header>
+            <p>
+                Sync로 만든 스키마 파일과 현재 브라우저에서 편집한 ERD 작업
+                데이터를 관리하세요. GitHub 로그인 없이 볼 수 있습니다.
+            </p>
+            <p>
+                KeepERD는 ChartDB 기반의 독립적인 비공식 포크이며, ChartDB와
+                제휴하거나 보증을 받지 않습니다.
+            </p>
+            <section class="panel">
+                <div class="filters">
+                    <label
+                        >조직 / 계정<select
+                            id="org-filter"
+                            aria-label="저장된 조직 필터"
+                        >
+                            <option value="">전체 조직 / 계정</option>
+                        </select></label
+                    >
+                    <label
+                        >레포<select
+                            id="repo-filter"
+                            aria-label="저장된 레포 필터"
+                        >
+                            <option value="">전체 레포</option>
+                        </select></label
+                    >
+                    <label
+                        >브랜치 검색<input
+                            id="branch-filter"
+                            type="search"
+                            placeholder="main, develop, feat/..."
+                            aria-label="저장된 브랜치 검색"
+                    /></label>
+                </div>
+                <p id="usage">저장 공간 확인 중…</p>
+                <div class="storage-explainer">
+                    <div>
+                        <strong>Sync 결과 스키마 파일</strong>
+                        <span
+                            >Sync할 때 읽어온 테이블·컬럼·관계 정보입니다.
+                            삭제해도 같은 레포와 브랜치를 다시 Sync하면
+                            생성됩니다.</span
+                        >
+                    </div>
+                    <div>
+                        <strong>이 브라우저의 ERD 작업 데이터</strong>
+                        <span
+                            >직접 수정한 테이블 배치·색상·영역·메모·필터입니다.
+                            삭제하면 다시 Sync해도 복구되지 않습니다.</span
+                        >
+                    </div>
+                </div>
+                <div class="toolbar">
+                    <label
+                        ><input id="select-all" type="checkbox" />현재 목록 전체
+                        선택</label
+                    >
+                    <div class="toolbar-actions">
+                        <button id="refresh">새로고침</button
+                        ><button id="delete" class="danger" disabled>
+                            선택 삭제 (0)
+                        </button>
+                    </div>
+                </div>
+            </section>
+            <p id="status" role="status" aria-live="polite">
+                저장된 ERD를 불러오는 중…
+            </p>
+            <div id="cards" class="cards"></div>
+            <footer>
+                브라우저 작업 데이터 용량은 JSON 크기 추정치이며 실제 디스크
+                점유량과 다를 수 있습니다.<br />선택 삭제는 위 두 종류의
+                데이터와 자동 백업을 지웁니다. 다른 브라우저의 데이터는 지우지
+                않습니다.<br />직접 GitHub에서 내려받아 작업 중인 프로젝트
+                폴더와, ChartDB가 다음 Sync를 위해 내부에 보관한 코드 복사본도
+                삭제하지 않습니다.<br />카드의
+                <strong>이 브랜치에서 마지막으로 Sync한 스키마 JSON</strong>은
+                작업 배치 백업이나 레포 공통 작업 데이터 가져오기용 파일이
+                아닙니다.
+            </footer>
+        </main>
+        <div
+            id="delete-dialog"
+            class="dialog-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-dialog-title"
+            hidden
+        >
+            <section class="dialog-card">
+                <h2 id="delete-dialog-title">선택한 ERD를 삭제할까요?</h2>
+                <p id="delete-summary"></p>
+                <div id="delete-targets" class="dialog-targets"></div>
+                <p>
+                    Sync 결과 스키마 파일과 이 브라우저의
+                    배치·색상·영역·메모·필터·자동 백업을 삭제합니다.
+                </p>
+                <p class="dialog-warning">
+                    브라우저 작업 데이터는 다시 Sync해도 복구되지 않습니다.
+                    중요한 작업은 먼저 ChartDB JSON으로 내보내세요.
+                </p>
+                <p>
+                    직접 받은 프로젝트 폴더와 ChartDB가 Sync용으로 보관한 코드
+                    복사본은 삭제하지 않습니다.
+                </p>
+                <div class="dialog-actions">
+                    <button id="delete-cancel" type="button">취소</button>
+                    <button id="delete-confirm" class="danger" type="button">
+                        삭제
+                    </button>
+                </div>
+            </section>
+        </div>
+        <script type="module" src="/library.js?v=delete-feedback-1"></script>
+    </body>
+</html>

@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="ko">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>KeepERD · Local ERD Sync</title>
+        <style>
+            :root {
+                color-scheme: dark;
+                font-family: system-ui, sans-serif;
+                background: #0b1120;
+                color: #e2e8f0;
+            }
+            body {
+                margin: 0;
+                background: radial-gradient(
+                    ellipse at 50% 0%,
+                    #25214a80,
+                    transparent 65%
+                );
+                min-height: 100vh;
+            }
+            main {
+                max-width: 900px;
+                margin: auto;
+                padding: 58px 24px 64px;
+            }
+            header {
+                text-align: center;
+            }
+            .eyebrow {
+                font-size: 12px;
+                letter-spacing: 3px;
+                color: #a5b4fc;
+                font-weight: 600;
+                margin-bottom: 26px;
+            }
+            .avatar {
+                width: 90px;
+                height: 90px;
+                border-radius: 50%;
+                border: 3px solid #475569;
+                object-fit: cover;
+                margin: auto;
+                background: #172131;
+                display: grid;
+                place-items: center;
+                font-size: 28px;
+            }
+            #avatar {
+                display: none;
+            }
+            h1 {
+                font-size: 28px;
+                letter-spacing: -0.8px;
+                margin: 16px 0 4px;
+            }
+            #login {
+                color: #94a3b8;
+                text-decoration: none;
+                font-size: 14px;
+            }
+            p {
+                color: #94a3b8;
+                line-height: 1.7;
+            }
+            header p {
+                margin: 18px auto 0;
+                font-size: 14px;
+                max-width: 580px;
+            }
+            .library-link {
+                display: inline-flex;
+                align-items: center;
+                margin-top: 20px;
+                padding: 10px 16px;
+                border: 1px solid #475569;
+                border-radius: 10px;
+                background: #172131;
+                color: #c7d2fe;
+                font-size: 13px;
+                text-decoration: none;
+            }
+            .library-link:hover {
+                background: #263453;
+                border-color: #818cf8;
+            }
+            .chooser {
+                max-width: 570px;
+                margin: 32px auto 36px;
+                padding: 24px;
+                background: #111c30;
+                border: 1px solid #334155;
+                border-radius: 16px;
+                text-align: center;
+                box-shadow: 0 16px 48px #0002;
+            }
+            label {
+                display: block;
+                text-align: left;
+                font-size: 14px;
+                font-weight: 600;
+                margin-bottom: 10px;
+            }
+            input,
+            select {
+                box-sizing: border-box;
+                width: 100%;
+                background: #0b1425;
+                color: #e2e8f0;
+                border: 1px solid #364152;
+                border-radius: 9px;
+                padding: 12px;
+                font: 14px system-ui;
+            }
+            input {
+                margin-bottom: 8px;
+            }
+            .picker {
+                position: relative;
+                margin-bottom: 22px;
+                text-align: left;
+            }
+            .picker.open {
+                z-index: 100001;
+            }
+            .picker-trigger {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                width: 100%;
+                min-height: 62px;
+                padding: 12px 16px;
+                border: 1px solid #364152;
+                border-radius: 10px;
+                background: #0b1425;
+                color: #e2e8f0;
+                font: 14px system-ui;
+                text-align: left;
+            }
+            .picker-trigger:hover:not(:disabled) {
+                border-color: #818cf8;
+                background: #121d33;
+            }
+            .picker-trigger:disabled {
+                opacity: 0.55;
+                cursor: not-allowed;
+            }
+            .picker-trigger[aria-expanded='true'] {
+                border-color: #a5b4fc;
+            }
+            .picker-trigger > svg {
+                width: 16px;
+                height: 16px;
+                flex: none;
+                color: #94a3b8;
+            }
+            .picker-row {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex: 1;
+                min-width: 0;
+            }
+            .picker-text {
+                flex: 1;
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+            .picker-text small {
+                display: block;
+                margin-top: 3px;
+                color: #94a3b8;
+                font-size: 11px;
+            }
+            .owner-avatar {
+                width: 36px;
+                height: 36px;
+                border-radius: 9px;
+                object-fit: cover;
+                flex: none;
+                background: #25314b;
+            }
+            .owner-avatar-fallback {
+                display: grid;
+                place-items: center;
+                color: #c7d2fe;
+                font-weight: 600;
+            }
+            .repo-lock {
+                margin-left: auto;
+                display: flex;
+                flex: none;
+                color: #94a3b8;
+            }
+            .repo-lock svg {
+                width: 16px;
+                height: 16px;
+            }
+            .picker-list {
+                position: absolute;
+                top: calc(100% + 6px);
+                left: 0;
+                right: 0;
+                z-index: 20;
+                max-height: 300px;
+                overflow-y: auto;
+                padding: 6px;
+                border: 1px solid #475569;
+                border-radius: 12px;
+                background: #111c30;
+                box-shadow: 0 18px 44px #0007;
+            }
+            .picker-list [role='option'] {
+                padding: 12px 10px;
+                min-height: 28px;
+                border-radius: 7px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+            }
+            .picker-list [role='option']:hover,
+            .picker-list [role='option'].active {
+                background: #263453;
+            }
+            .picker-list [aria-selected='true'] {
+                color: #c7d2fe;
+                background: #222944;
+            }
+            .organization-picker .picker-list {
+                display: block;
+                max-height: min(340px, calc(100vh - 180px));
+                padding: 6px;
+            }
+            .organization-picker .picker-trigger {
+                min-height: 64px;
+                padding: 9px 12px;
+            }
+            .organization-picker .picker-list [role='option'] {
+                box-sizing: border-box;
+                min-height: 60px;
+                padding: 8px 10px;
+                border-radius: 10px;
+            }
+            .organization-picker .picker-list [role='option']:hover,
+            .organization-picker .picker-list [role='option'].active {
+                background: #263453;
+            }
+            .organization-picker .picker-list [aria-selected='true'] {
+                color: #c7d2fe;
+                background: #2b3858;
+            }
+            .organization-picker .picker-list .picker-row {
+                width: 100%;
+                gap: 12px;
+            }
+            .organization-picker .owner-avatar {
+                box-sizing: border-box;
+                width: 44px;
+                height: 44px;
+                border: 2px solid #334155;
+                border-radius: 11px;
+                object-fit: cover;
+                background: #fff;
+            }
+            .organization-picker .picker-list .picker-text {
+                position: static;
+                width: auto;
+                height: auto;
+                margin: 0;
+                overflow: visible;
+                clip-path: none;
+                white-space: normal;
+                font-size: 15px;
+            }
+            .sr-only {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                padding: 0;
+                margin: -1px;
+                overflow: hidden;
+                clip-path: inset(50%);
+                white-space: nowrap;
+            }
+            select:focus-visible,
+            input:focus-visible,
+            button:focus-visible,
+            a:focus-visible {
+                outline: 2px solid #a5b4fc;
+                outline-offset: 3px;
+            }
+            #repo-status {
+                font-size: 13px;
+                margin: 10px 0 0;
+                min-height: 20px;
+                color: #cbd5e1;
+            }
+            #repo-status:empty {
+                display: none;
+            }
+            #source-heading {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 10px;
+            }
+            #source-heading label {
+                margin: 0;
+            }
+            #source-mode {
+                margin-bottom: 24px;
+            }
+            #source-heading #erd-info {
+                z-index: 30;
+            }
+            #source-heading #erd-info-button {
+                display: grid;
+                place-items: center;
+                background: transparent;
+                border: 1px solid #364152;
+                cursor: pointer;
+            }
+            button {
+                cursor: pointer;
+            }
+            #retry {
+                background: none;
+                border: 0;
+                color: #a5b4fc;
+                padding: 8px;
+                font: 13px system-ui;
+                text-decoration: underline;
+            }
+            .local-registration {
+                margin: 4px 0 22px;
+                border: 1px solid #334155;
+                border-radius: 12px;
+                background: #0d1729;
+                text-align: left;
+            }
+            .local-registration summary {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 13px 15px;
+                color: #c7d2fe;
+                font-size: 13px;
+                font-weight: 650;
+                cursor: pointer;
+                list-style: none;
+            }
+            .local-registration summary::-webkit-details-marker {
+                display: none;
+            }
+            .local-registration summary::before {
+                content: '+';
+                display: grid;
+                place-items: center;
+                width: 20px;
+                height: 20px;
+                border-radius: 6px;
+                background: #312e81;
+                color: #e0e7ff;
+                font-size: 16px;
+                line-height: 1;
+            }
+            .local-registration[open] summary::before {
+                content: '−';
+            }
+            #local-registration {
+                padding: 2px 15px 15px;
+            }
+            #local-registration label {
+                margin-bottom: 7px;
+                color: #cbd5e1;
+                font-size: 12px;
+            }
+            .local-registration-row {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+                gap: 8px;
+            }
+            .local-registration-row input {
+                min-width: 0;
+                margin: 0;
+            }
+            #register-local {
+                min-width: 72px;
+                border: 1px solid #6366f1;
+                border-radius: 9px;
+                padding: 0 16px;
+                background: #4f46e5;
+                color: white;
+                font: 650 13px system-ui;
+            }
+            #register-local:hover:not(:disabled) {
+                background: #6366f1;
+                border-color: #818cf8;
+            }
+            #register-local:disabled {
+                cursor: wait;
+                opacity: 0.65;
+            }
+            .local-registration-help {
+                margin-bottom: 14px;
+                margin: 9px 0 0;
+                color: #7f8da5;
+                font-size: 11px;
+                line-height: 1.55;
+            }
+            #worktree-field {
+                margin-top: -4px;
+            }
+            #choose-local-folder {
+                width: 100%;
+                padding: 12px;
+                border: 1px solid #6366f1;
+                border-radius: 9px;
+                background: #312e81;
+                color: #eef2ff;
+                font: 600 13px system-ui;
+            }
+            #choose-local-folder:disabled {
+                opacity: 0.6;
+                cursor: wait;
+            }
+            .worktree-picker .picker-trigger {
+                min-height: 66px;
+            }
+            .worktree-picker .picker-list [role='option'] {
+                min-height: 40px;
+                padding: 7px 10px;
+            }
+            .worktree-picker .picker-text {
+                overflow: hidden;
+            }
+            .worktree-picker .picker-text small {
+                margin-top: 6px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            #repo-heading {
+                font-size: 18px;
+                margin-bottom: 16px;
+                overflow-wrap: anywhere;
+            }
+            .cards {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 18px;
+            }
+            article {
+                padding: 24px;
+                border: 1px solid #334155;
+                border-radius: 16px;
+                background: #111c30;
+            }
+            article h3 {
+                font-size: 20px;
+                margin: 0 0 12px;
+                overflow-wrap: anywhere;
+            }
+            article p {
+                font-size: 13px;
+                margin: 0 0 12px;
+            }
+            code {
+                font-size: 12px;
+                color: #c7d2fe;
+            }
+            a {
+                color: #a5b4fc;
+            }
+            a.button {
+                display: block;
+                text-align: center;
+                background: #4f46e5;
+                color: white;
+                text-decoration: none;
+                padding: 12px;
+                border-radius: 9px;
+                margin: 20px 0 12px;
+            }
+            a.button:hover {
+                background: #6366f1;
+            }
+            article > a:last-child {
+                font-size: 12px;
+            }
+            .empty {
+                grid-column: 1/-1;
+                text-align: center;
+                padding: 36px 20px;
+                border: 1px dashed #334155;
+                border-radius: 14px;
+                color: #94a3b8;
+                line-height: 1.8;
+                font-size: 14px;
+            }
+            footer {
+                text-align: center;
+                margin-top: 32px;
+                color: #64748b;
+                font-size: 12px;
+                line-height: 1.8;
+            }
+            @media (max-width: 640px) {
+                main {
+                    padding: 30px 16px;
+                }
+                .chooser {
+                    padding: 18px;
+                }
+                .cards {
+                    grid-template-columns: 1fr;
+                }
+            }
+            [hidden] {
+                display: none !important;
+            }
+            #auth-guide {
+                max-width: 570px;
+                margin: 32px auto;
+                padding: 24px;
+                background: #111c30;
+                border: 1px solid #818cf8;
+                border-radius: 16px;
+            }
+            #auth-guide h2 {
+                font-size: 18px;
+                margin: 0 0 12px;
+            }
+            #auth-guide p {
+                font-size: 14px;
+                margin: 12px 0;
+            }
+            #auth-guide pre {
+                overflow: auto;
+                background: #0b1425;
+                border: 1px solid #334155;
+                padding: 16px;
+                border-radius: 9px;
+                line-height: 1.8;
+            }
+            #auth-guide code {
+                color: #e2e8f0;
+            }
+        </style>
+    </head>
+    <body>
+        <main>
+            <header>
+                <div class="eyebrow">KEEPERD · LOCAL ERD</div>
+                <div id="avatar-fallback" class="avatar" aria-hidden="true">
+                    <svg
+                        width="44"
+                        height="44"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        aria-hidden="true"
+                    >
+                        <circle cx="12" cy="8" r="4" />
+                        <path d="M4 21v-2a8 8 0 0 1 16 0v2" />
+                    </svg>
+                </div>
+                <img
+                    id="avatar"
+                    class="avatar"
+                    alt="GitHub 프로필 이미지"
+                    referrerpolicy="no-referrer"
+                />
+                <h1 id="account-name">GitHub 계정을 불러오는 중…</h1>
+                <a id="login" target="_blank" rel="noreferrer"></a>
+                <p id="header-description">
+                    조직과 레포를 선택하고, 원하는 브랜치의 데이터베이스를
+                    살펴보세요.
+                    <span
+                        id="local-description"
+                        hidden
+                        style="display: block; margin-top: 4px"
+                    ></span>
+                </p>
+                <p>
+                    KeepERD는 ChartDB 기반의 독립적인 비공식 포크이며, ChartDB와
+                    제휴하거나 보증을 받지 않습니다.
+                </p>
+                <a id="saved-link" class="library-link" href="/saved"
+                    >저장된 ERD 관리 →</a
+                >
+            </header>
+            <section id="auth-guide" aria-labelledby="auth-title" hidden>
+                <h2 id="auth-title">터미널에서 GitHub에 로그인하세요</h2>
+                <p id="auth-description">
+                    KeepERD 서버를 실행한 컴퓨터의 터미널에서 아래 명령을
+                    실행하세요. 브라우저의 GitHub 로그인과는 별개입니다.
+                </p>
+                <pre><code>gh auth login --hostname github.com --git-protocol https --web
+gh auth setup-git
+gh auth status</code></pre>
+                <p>
+                    레포에 접근 가능한 계정으로 로그인한 뒤, 아래
+                    <strong>로그인 다시 확인</strong>을 누르세요. 서버를
+                    재시작할 필요는 없습니다.
+                </p>
+            </section>
+            <section class="chooser" aria-label="레포와 브랜치 선택">
+                <div id="source-heading">
+                    <label for="source-mode">스키마 입력 출처</label>
+                </div>
+                <select id="source-mode" aria-label="스키마 입력 출처">
+                    <option value="remote">원격 GitHub</option>
+                    <option value="local">로컬 저장소</option>
+                </select>
+                <p id="selection-loading" role="status" hidden>
+                    저장소와 브랜치를 준비하는 중…
+                </p>
+                <div id="selection-content">
+                    <label id="organization-label" for="organization-trigger"
+                        >GitHub 조직 / 계정</label
+                    >
+                    <select id="organization" disabled>
+                        <option value="">조직 불러오는 중…</option>
+                    </select>
+                    <label id="repository-label" for="repository-trigger"
+                        >적용할 GitHub 레포</label
+                    >
+                    <input
+                        id="repo-search"
+                        type="search"
+                        aria-label="레포 검색"
+                        placeholder="레포 이름으로 검색"
+                        disabled
+                    />
+                    <select
+                        id="repository"
+                        aria-label="적용할 GitHub 레포"
+                        disabled
+                    >
+                        <option>레포 불러오는 중…</option>
+                    </select>
+                    <div id="worktree-field" hidden>
+                        <label id="worktree-label" for="worktree-trigger"
+                            >사용할 로컬 복제본</label
+                        >
+                        <select
+                            id="worktree"
+                            aria-label="사용할 로컬 복제본"
+                            disabled
+                        >
+                            <option>worktree를 선택하세요</option>
+                        </select>
+                    </div>
+                    <details
+                        id="local-registration-shell"
+                        class="local-registration"
+                        hidden
+                    >
+                        <summary>다른 로컬 저장소 또는 worktree 추가</summary>
+                        <form id="local-registration">
+                            <button id="choose-local-folder" type="button">
+                                폴더 선택…
+                            </button>
+                            <p class="local-registration-help">
+                                .git이 바로 들어 있는 폴더만 등록합니다. 연결된
+                                worktree도 지원합니다.
+                            </p>
+                            <label for="local-path">절대 경로</label>
+                            <div class="local-registration-row">
+                                <input
+                                    id="local-path"
+                                    aria-label="로컬 저장소 절대 경로"
+                                    placeholder="/Users/you/Documents/code/backend"
+                                    required
+                                />
+                                <button id="register-local" type="submit">
+                                    추가
+                                </button>
+                            </div>
+                            <p class="local-registration-help">
+                                Git clone 또는 Codex worktree의 루트 경로를
+                                입력하세요. 경로는 이 컴퓨터의 개인 설정에만
+                                저장됩니다.
+                            </p>
+                        </form>
+                    </details>
+                    <p id="repo-status" role="status" aria-live="polite"></p>
+                    <button id="retry" type="button">
+                        계정·레포 목록 새로고침
+                    </button>
+                    <div id="sync-controls"></div>
+                </div>
+            </section>
+            <footer>
+                배치·색상·메모는 이 브라우저에서 같은 레포의 브랜치끼리
+                공유됩니다.<br />중요한 배치는 ChartDB의 JSON 내보내기로
+                백업하세요. <br />db/schema/*.sql을 우선 사용하고, 없으면
+                db/migration/*.sql을 재생합니다. <br />로컬 브랜치는 커밋된
+                스키마만 반영합니다.
+            </footer>
+        </main>
+        <script type="module" src="/sync-ui.js"></script>
+        <script type="module" src="/home.js"></script>
+    </body>
+</html>

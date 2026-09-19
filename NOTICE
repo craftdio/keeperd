@@ -1,0 +1,12 @@
+KeepERD
+
+KeepERD is an independent, unofficial fork based on ChartDB.
+It is not affiliated with or endorsed by ChartDB.
+
+Upstream project: https://github.com/chartdb/chartdb
+KeepERD source: https://github.com/craftdio/keeperd
+
+This distribution includes material licensed under the GNU Affero General
+Public License, version 3.  The complete license text is provided in LICENSE.
+KeepERD preserves the upstream copyright notices and makes its corresponding
+source code available from the KeepERD source repository above.
