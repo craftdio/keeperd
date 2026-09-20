@@ -4,6 +4,7 @@ on:
     push:
         tags:
             - 'v*'
+    workflow_dispatch:
 
 concurrency:
     group: release-${{ github.ref }}
@@ -13,6 +14,7 @@ jobs:
     validate:
         name: Validate release
         runs-on: ubuntu-latest
+        timeout-minutes: 45
         permissions:
             contents: read
         env:
@@ -28,14 +30,40 @@ jobs:
                   fetch-depth: 0
                   persist-credentials: false
 
-            - name: Validate tag and KeepERD version
+            - name: Use Node.js 24.x
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24.x
+
+            - name: Require main for manual dry run
+              if: github.event_name == 'workflow_dispatch'
+              run: |
+                  set -euo pipefail
+                  if [ "${GITHUB_REF}" != 'refs/heads/main' ]; then
+                    echo 'Manual release dry runs must be dispatched from main.' >&2
+                    exit 1
+                  fi
+
+            - name: Validate KeepERD release version
               id: version
               env:
+                  EVENT_NAME: ${{ github.event_name }}
                   TAG: ${{ github.ref_name }}
               run: |
-                  VERSION="${TAG#v}"
-                  if [ "v${VERSION}" != "${TAG}" ]; then
-                    echo "Invalid KeepERD release tag: ${TAG}" >&2
+                  set -euo pipefail
+                  if [ "${EVENT_NAME}" = 'push' ]; then
+                    VERSION="${TAG#v}"
+                    if [ "v${VERSION}" != "${TAG}" ]; then
+                      echo "Invalid KeepERD release tag: ${TAG}" >&2
+                      exit 1
+                    fi
+                  elif [ "${EVENT_NAME}" = 'workflow_dispatch' ]; then
+                    VERSION="$(
+                      node --input-type=module -e \
+                        "import { readKeeperdVersion } from './tools/local-erd/keeperd-version.mjs'; console.log(readKeeperdVersion());"
+                    )"
+                  else
+                    echo "Unsupported release event: ${EVENT_NAME}" >&2
                     exit 1
                   fi
                   VERSION="${VERSION}" node --input-type=module -e \
@@ -44,16 +72,12 @@ jobs:
 
             - name: Verify tagged commit belongs to main
               run: |
+                  set -euo pipefail
                   git fetch --no-tags origin main:refs/remotes/origin/main
                   if ! git merge-base --is-ancestor HEAD origin/main; then
                     echo "Tagged commit ${GITHUB_SHA} is not an ancestor of origin/main." >&2
                     exit 1
                   fi
-
-            - name: Use Node.js 24.x
-              uses: actions/setup-node@v4
-              with:
-                  node-version: 24.x
 
             - name: Install dependencies
               run: npm ci
@@ -71,6 +95,7 @@ jobs:
 
             - name: Build clean KeepERD production app
               run: |
+                  set -euo pipefail
                   rm -rf dist
                   npm run local:build
                   test -f dist/index.html
@@ -79,6 +104,7 @@ jobs:
               env:
                   VERSION: ${{ steps.version.outputs.version }}
               run: |
+                  set -euo pipefail
                   npm run keeperd:bundle -- \
                     --version="${VERSION}" \
                     --output-directory=release
@@ -89,12 +115,15 @@ jobs:
               env:
                   VERSION: ${{ steps.version.outputs.version }}
               working-directory: release
-              run: sha256sum --check "keeperd-v${VERSION}.tar.gz.sha256"
+              run: |
+                  set -euo pipefail
+                  sha256sum --check "keeperd-v${VERSION}.tar.gz.sha256"
 
             - name: Smoke-test extracted release archive
               env:
                   VERSION: ${{ steps.version.outputs.version }}
               run: |
+                  set -euo pipefail
                   EXTRACT_DIR="$(mktemp -d)"
                   trap 'rm -rf "${EXTRACT_DIR}"' EXIT
                   tar -xzf "release/keeperd-v${VERSION}.tar.gz" -C "${EXTRACT_DIR}"
@@ -107,6 +136,7 @@ jobs:
               env:
                   VERSION: ${{ steps.version.outputs.version }}
               run: |
+                  set -euo pipefail
                   ARCHIVE="release/keeperd-v${VERSION}.tar.gz"
                   CONTENTS="$(tar -tzf "${ARCHIVE}")"
                   for REQUIRED in \
@@ -139,11 +169,12 @@ jobs:
     publish:
         name: Publish GitHub Release
         needs: validate
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         runs-on: ubuntu-latest
+        timeout-minutes: 10
         permissions:
             contents: write
         env:
-            GH_TOKEN: ${{ github.token }}
             TAG: ${{ github.ref_name }}
             VERSION: ${{ needs.validate.outputs.version }}
 
@@ -170,8 +201,24 @@ jobs:
                   name: keeperd-v${{ needs.validate.outputs.version }}
                   path: release
 
-            - name: Publish immutable GitHub Release
+            - name: Re-verify downloaded release assets
               run: |
+                  set -euo pipefail
+                  EXPECTED_FILES="$(printf '%s\n%s\n' "keeperd-v${VERSION}.tar.gz" "keeperd-v${VERSION}.tar.gz.sha256")"
+                  ACTUAL_FILES="$(find release -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)"
+                  test "${ACTUAL_FILES}" = "${EXPECTED_FILES}"
+                  test -f "release/keeperd-v${VERSION}.tar.gz"
+                  test -f "release/keeperd-v${VERSION}.tar.gz.sha256"
+                  (
+                    cd release
+                    sha256sum --check "keeperd-v${VERSION}.tar.gz.sha256"
+                  )
+
+            - name: Publish immutable GitHub Release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
                   gh release create "${TAG}" \
                     "release/keeperd-v${VERSION}.tar.gz" \
                     "release/keeperd-v${VERSION}.tar.gz.sha256" \
