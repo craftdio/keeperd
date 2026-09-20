@@ -1,0 +1,181 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - 'v*'
+
+concurrency:
+    group: release-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    validate:
+        name: Validate release
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        env:
+            NODE_OPTIONS: --max-old-space-size=4096
+
+        outputs:
+            version: ${{ steps.version.outputs.version }}
+
+        steps:
+            - name: Checkout tagged commit
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - name: Validate tag and KeepERD version
+              id: version
+              env:
+                  TAG: ${{ github.ref_name }}
+              run: |
+                  VERSION="${TAG#v}"
+                  if [ "v${VERSION}" != "${TAG}" ]; then
+                    echo "Invalid KeepERD release tag: ${TAG}" >&2
+                    exit 1
+                  fi
+                  VERSION="${VERSION}" node --input-type=module -e \
+                    "import { assertKeeperdVersion } from './tools/local-erd/keeperd-version.mjs'; assertKeeperdVersion(process.env.VERSION);"
+                  echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+            - name: Verify tagged commit belongs to main
+              run: |
+                  git fetch --no-tags origin main:refs/remotes/origin/main
+                  if ! git merge-base --is-ancestor HEAD origin/main; then
+                    echo "Tagged commit ${GITHUB_SHA} is not an ancestor of origin/main." >&2
+                    exit 1
+                  fi
+
+            - name: Use Node.js 24.x
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24.x
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Lint
+              run: npm run lint
+
+            - name: Run tests
+              env:
+                  NODE_OPTIONS: --max-old-space-size=4096 --localstorage-file=${{ runner.temp }}/chartdb-localstorage
+              run: npm run test:ci
+
+            - name: Run KeepERD CLI tests
+              run: npm run local:test:cli
+
+            - name: Build clean KeepERD production app
+              run: |
+                  rm -rf dist
+                  npm run local:build
+                  test -f dist/index.html
+
+            - name: Create KeepERD release bundle
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+              run: |
+                  npm run keeperd:bundle -- \
+                    --version="${VERSION}" \
+                    --output-directory=release
+                  test -f "release/keeperd-v${VERSION}.tar.gz"
+                  test -f "release/keeperd-v${VERSION}.tar.gz.sha256"
+
+            - name: Verify exact release checksum
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+              working-directory: release
+              run: sha256sum --check "keeperd-v${VERSION}.tar.gz.sha256"
+
+            - name: Smoke-test extracted release archive
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+              run: |
+                  EXTRACT_DIR="$(mktemp -d)"
+                  trap 'rm -rf "${EXTRACT_DIR}"' EXIT
+                  tar -xzf "release/keeperd-v${VERSION}.tar.gz" -C "${EXTRACT_DIR}"
+                  BUNDLE="${EXTRACT_DIR}/keeperd-v${VERSION}"
+                  VERSION_OUTPUT="$(node "${BUNDLE}/bin/keeperd.mjs" --version)"
+                  test "${VERSION_OUTPUT}" = "KeepERD ${VERSION}"
+                  node "${BUNDLE}/bin/keeperd.mjs" --help | grep -F 'keeperd <command> [options]'
+
+            - name: Check release archive contents
+              env:
+                  VERSION: ${{ steps.version.outputs.version }}
+              run: |
+                  ARCHIVE="release/keeperd-v${VERSION}.tar.gz"
+                  CONTENTS="$(tar -tzf "${ARCHIVE}")"
+                  for REQUIRED in \
+                    bin/keeperd.mjs \
+                    dist/index.html \
+                    tools/local-erd/server.mjs \
+                    package.json \
+                    package-lock.json \
+                    KEEPERD_VERSION \
+                    LICENSE \
+                    NOTICE
+                  do
+                    echo "${CONTENTS}" | grep -Fx "keeperd-v${VERSION}/${REQUIRED}"
+                  done
+                  if echo "${CONTENTS}" | grep -E '/(node_modules|\.git|\.local-erd)(/|$)|\.test\.(mjs|js)$'; then
+                    echo 'Release archive contains a forbidden path.' >&2
+                    exit 1
+                  fi
+
+            - name: Upload validated release assets
+              uses: actions/upload-artifact@v4
+              with:
+                  name: keeperd-v${{ steps.version.outputs.version }}
+                  path: |
+                      release/keeperd-v${{ steps.version.outputs.version }}.tar.gz
+                      release/keeperd-v${{ steps.version.outputs.version }}.tar.gz.sha256
+                  if-no-files-found: error
+                  retention-days: 1
+
+    publish:
+        name: Publish GitHub Release
+        needs: validate
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        env:
+            GH_TOKEN: ${{ github.token }}
+            TAG: ${{ github.ref_name }}
+            VERSION: ${{ needs.validate.outputs.version }}
+
+        steps:
+            - name: Reject an existing release
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      try {
+                        await github.rest.repos.getReleaseByTag({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          tag: context.ref.replace('refs/tags/', ''),
+                        });
+                      } catch (error) {
+                        if (error.status === 404) return;
+                        throw error;
+                      }
+                      core.setFailed(`A GitHub Release already exists for ${context.ref}.`);
+
+            - name: Download validated release assets
+              uses: actions/download-artifact@v4
+              with:
+                  name: keeperd-v${{ needs.validate.outputs.version }}
+                  path: release
+
+            - name: Publish immutable GitHub Release
+              run: |
+                  gh release create "${TAG}" \
+                    "release/keeperd-v${VERSION}.tar.gz" \
+                    "release/keeperd-v${VERSION}.tar.gz.sha256" \
+                    --repo "${GITHUB_REPOSITORY}" \
+                    --verify-tag \
+                    --title "KeepERD ${VERSION}" \
+                    --notes "KeepERD ${VERSION}"

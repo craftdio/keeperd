@@ -108,11 +108,11 @@ npm run local:start
 
 <br />
 
-### KeepERD Release Candidate 검증 (관리자)
+### KeepERD 공개 Release (관리자)
 
-이 private 개발 저장소는 사용자용 GitHub Release를 만들지 않습니다. KeepERD 제품 버전의 단일 기준은 저장소 루트의 `KEEPERD_VERSION`이며, `package.json`의 ChartDB upstream 버전과는 별개입니다.
+`craftdio/keeperd`는 KeepERD의 public canonical source repository이며 사용자용 GitHub Release를 게시합니다. KeepERD 제품 버전의 단일 기준은 저장소 루트의 `KEEPERD_VERSION`이며, `package.json`의 ChartDB upstream 버전과는 별개입니다.
 
-PR CI는 `npm ci` → KeepERD 로컬 화면 build → `KEEPERD_VERSION` 검증 → release bundle 생성 → SHA256 검증까지 수행합니다. 검증된 source snapshot은 public canonical source repository인 `craftdio/keeperd`로 승격합니다. 실제 `vX.Y.Z` tag, GitHub Release와 Homebrew가 참조할 asset은 그 저장소에서 생성합니다.
+PR CI는 build, test, release bundle 생성과 SHA256 검증을 수행합니다. 관리자가 `KEEPERD_VERSION`과 일치하는 `vX.Y.Z` tag를 `main`의 commit에 push하면 public Release workflow가 tag와 version, `main` 포함 여부를 검증하고 깨끗한 KeepERD production build에서 bundle을 다시 생성합니다. 모든 검증이 끝난 뒤에만 해당 tag의 GitHub Release와 Homebrew가 참조할 asset을 게시합니다.
 
 CI가 검증하는 bundle은 다음 구조를 사용합니다.
 
@@ -123,7 +123,7 @@ keeperd-v0.1.0.tar.gz.sha256
 
 archive는 사전 빌드된 `dist/`, KeepERD 런타임 스크립트, CLI, `KEEPERD_VERSION`, 라이선스·출처 고지와 선택적 재빌드용 npm manifest만 포함합니다. `node_modules`나 테스트 파일은 넣지 않습니다. archive 안의 build marker는 Git checkout이 없는 Homebrew 설치 경로에서도 포함된 화면을 현재 build로 인식하도록 설정됩니다.
 
-`craftdio/keeperd`에서 실제 Release asset을 만든 뒤에는 그 저장소에서 SHA256과 CLI를 점검합니다.
+Release workflow는 게시 전에 생성된 asset의 SHA256과 압축을 푼 CLI의 version 및 help 출력을 점검합니다. 수동으로 확인할 때는 다음 명령을 사용할 수 있습니다.
 
 ```sh
 shasum -a 256 -c keeperd-v0.1.0.tar.gz.sha256
@@ -132,7 +132,7 @@ node keeperd-v0.1.0/bin/keeperd.mjs --help
 node keeperd-v0.1.0/bin/keeperd.mjs --version
 ```
 
-다음 단계의 `craftdio/homebrew-keeperd` Formula는 `craftdio/keeperd` Release의 tarball URL과 SHA256만 참조합니다. Formula 작성·갱신 자동화와 public Release publish는 이 저장소의 범위가 아닙니다.
+`craftdio/homebrew-keeperd` Formula는 `craftdio/keeperd` GitHub Release의 immutable tarball URL과 게시된 SHA256만 참조합니다. Homebrew Formula 작성과 갱신은 별도 단계이며 이 저장소의 Release workflow는 Homebrew repository를 수정하지 않습니다.
 
 <br />
 
