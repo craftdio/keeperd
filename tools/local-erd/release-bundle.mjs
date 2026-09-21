@@ -30,9 +30,10 @@ const requiredEntries = [
     'LICENSE',
     'NOTICE',
 ];
+const requiredRuntimeTools = ['index.html', 'library.html'];
 
 const isRuntimeTool = (name) =>
-    /\.(?:mjs|js|sql)$/.test(name) && !/\.test\.(?:mjs|js)$/.test(name);
+    /\.(?:html|mjs|js|sql)$/.test(name) && !/\.test\.(?:mjs|js)$/.test(name);
 
 const tarBlockSize = 512;
 
@@ -162,6 +163,11 @@ function assertBundleInputs(projectRoot) {
         throw new Error('Release bundle input is missing: dist/index.html');
     if (!existsSync(path.join(projectRoot, 'tools', 'local-erd')))
         throw new Error('Release bundle input is missing: tools/local-erd');
+    for (const entry of requiredRuntimeTools) {
+        const relativePath = path.join('tools', 'local-erd', entry);
+        if (!existsSync(path.join(projectRoot, relativePath)))
+            throw new Error(`Release bundle input is missing: ${relativePath}`);
+    }
 }
 
 export function createReleaseBundle({

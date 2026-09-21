@@ -42,6 +42,14 @@ function fixture(version = '0.1.0') {
     write('tools/local-erd/schema-diff.js', 'runtime diff');
     write('tools/local-erd/introspect.sql', 'select 1;');
     write(
+        'tools/local-erd/index.html',
+        '<!doctype html><title>KeepERD</title>'
+    );
+    write(
+        'tools/local-erd/library.html',
+        '<!doctype html><title>Saved ERDs</title>'
+    );
+    write(
         'tools/local-erd/keeperd-version.mjs',
         readFileSync(
             path.join(sourceRoot, 'tools/local-erd/keeperd-version.mjs'),
@@ -86,6 +94,8 @@ test('creates a portable runtime archive with a source-controlled version and ch
             'tools/local-erd/server.mjs',
             'tools/local-erd/schema-diff.js',
             'tools/local-erd/introspect.sql',
+            'tools/local-erd/index.html',
+            'tools/local-erd/library.html',
             'package.json',
             'package-lock.json',
             'KEEPERD_VERSION',
