@@ -37,3 +37,18 @@ test('current ChartDB commit determines whether a local build can be reused', ()
         rmSync(root, { recursive: true, force: true });
     }
 });
+
+test('a packaged build does not inherit a parent Homebrew repository revision', () => {
+    const prefix = mkdtempSync(path.join(tmpdir(), 'homebrew-prefix-'));
+    try {
+        execFileSync('git', ['init', '-b', 'main'], { cwd: prefix });
+        const root = path.join(prefix, 'Cellar/keeperd/0.1.0/libexec');
+        mkdirSync(path.join(root, 'dist'), { recursive: true });
+        writeFileSync(path.join(root, 'dist/index.html'), 'packaged');
+        writeBuildMarker(root, null);
+
+        assert.equal(hasCurrentBuild(root), true);
+    } finally {
+        rmSync(prefix, { recursive: true, force: true });
+    }
+});

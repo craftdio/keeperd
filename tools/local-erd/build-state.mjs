@@ -1,5 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    realpathSync,
+    writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 
 export const buildMarker = (root) =>
@@ -7,6 +13,16 @@ export const buildMarker = (root) =>
 
 export const sourceRevision = (root) => {
     try {
+        const repositoryRoot = execFileSync(
+            'git',
+            ['rev-parse', '--show-toplevel'],
+            {
+                cwd: root,
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore'],
+            }
+        ).trim();
+        if (realpathSync(repositoryRoot) !== realpathSync(root)) return null;
         return (
             execFileSync('git', ['rev-parse', 'HEAD'], {
                 cwd: root,
