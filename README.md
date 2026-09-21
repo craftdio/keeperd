@@ -29,11 +29,36 @@ Sync한 스키마와 개인 설정은 로컬에 저장되며 GitHub로 자동 �
 
 ## 시작하기
 
-### 소스 checkout에서 실행 — 현재 사용 가능
+### Homebrew로 설치
 
-Node.js 22 이상, Git, Docker가 필요합니다. GitHub 원격 repository를 사용할
-때만 GitHub CLI(`gh`) 로그인도 필요합니다. 로컬 repository만 사용할 때는
-GitHub 로그인이 필요 없습니다.
+일반 사용자는 [공개 Homebrew tap](https://github.com/craftdio/homebrew-keeperd)을
+통한 설치를 권장합니다. Formula가 Node, Git, GitHub CLI(`gh`)를 함께 설치합니다.
+스키마 재현 기능을 사용하려면 Formula에 포함되지 않는 Docker Desktop 또는 Docker
+호환 런타임을 별도로 설치하고 실행해야 합니다.
+
+```sh
+brew tap craftdio/keeperd
+brew install keeperd
+keeperd init
+keeperd start
+```
+
+브라우저에서 [http://localhost:18777/](http://localhost:18777/)을 열고,
+**조직/계정 → repository → branch → Sync** 순서로 선택하세요. `127.0.0.1`으로
+접속하면 KeepERD가 정식 주소인 `localhost`로 이동합니다.
+
+GitHub 원격 repository를 사용할 때만 GitHub CLI 로그인이 필요할 수 있습니다.
+로컬 clone/worktree만 입력할 때는 GitHub 로그인이 필요 없습니다.
+
+```sh
+gh auth login --hostname github.com --git-protocol https --web
+gh auth setup-git
+```
+
+### 소스 checkout에서 실행
+
+개발, 기여, 수동 소스 기반 실행에는 source checkout을 사용하세요. Node.js 22
+이상, Git, Docker가 필요합니다.
 
 ```sh
 git clone https://github.com/craftdio/keeperd.git
@@ -42,24 +67,9 @@ npm run local:init
 npm run local:start
 ```
 
-브라우저에서 [http://localhost:18777/](http://localhost:18777/)을 열고,
-**조직/계정 → repository → branch → Sync** 순서로 선택하세요. `127.0.0.1`으로
-접속하면 KeepERD가 정식 주소인 `localhost`로 이동합니다.
-
-`local:init`은 필요한 의존성 설치와 첫 로컬 build를 처리합니다. 이후에는
-`npm run local:start`만 실행하면 됩니다.
-
-### 설치된 KeepERD CLI
-
-Release bundle 또는 향후 Homebrew 설치본에서는 같은 흐름을 아래처럼 사용합니다.
-
-```sh
-keeperd init
-keeperd start
-```
-
-Homebrew Formula는 아직 배포되지 않았습니다. Formula가 공개되기 전에는
-`brew tap` 또는 `brew install` 명령을 실행하지 마세요.
+`npm run local:init`은 필요한 의존성 설치와 첫 로컬 build를 처리합니다. 이후에는
+`npm run local:start`만 실행하면 됩니다. source checkout에서도 GitHub 원격
+repository를 사용할 때만 `gh` 로그인하면 됩니다.
 
 ## Repository Sync
 

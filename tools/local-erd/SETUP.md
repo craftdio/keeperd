@@ -19,11 +19,11 @@
 
 ### 1. 준비물과 인증
 
-Node.js 22 이상, Git, 실행 중인 Docker가 필요합니다. 원격 GitHub 모드에서는 GitHub CLI (`gh`)도 필요합니다.
+일반 사용자는 [공개 Homebrew tap](https://github.com/craftdio/homebrew-keeperd)을 통한 설치를 권장합니다. Homebrew Formula가 Node, Git, GitHub CLI (`gh`)를 자동으로 설치합니다. Docker는 Formula에 포함되지 않으므로 스키마 재현 기능을 사용하기 전에 Docker Desktop 또는 Docker 호환 런타임을 별도로 설치하고 실행해야 합니다.
 대상 저장소는 PostgreSQL 17에서 실행 가능한 `db/schema/*.sql` 또는 `db/migration/*.sql`을 포함해야 합니다. 둘 다 있으면 Atlas의 최종 목표 상태인 `db/schema`를 우선 사용하고 migration은 실행하지 않습니다.
 Docker Desktop을 사용한다면 먼저 앱을 실행하세요.
 
-원격 모드에서는 대상 백엔드에 접근 가능한 GitHub 계정으로 로그인하세요. 로컬 모드는 이 인증 단계를 건너뜁니다. 비공개 저장소 clone에는 별도 Git 인증이 필요할 수 있습니다.
+원격 GitHub 입력을 사용할 때는 대상 백엔드에 접근 가능한 GitHub 계정으로 로그인해야 할 수 있습니다. 로컬 clone/worktree 입력은 이 인증 단계를 건너뜁니다. 비공개 저장소 clone에는 별도 Git 인증이 필요할 수 있습니다.
 
 ```sh
 gh auth login --hostname github.com --git-protocol https --web
@@ -32,7 +32,57 @@ gh auth setup-git
 
 <br />
 
-### 2. Clone하고 한 번에 초기화
+### 2. Homebrew 설치 및 초기화
+
+```sh
+brew tap craftdio/keeperd
+brew install keeperd
+keeperd init
+```
+
+`keeperd init`은 설치된 패키지에서 개인 설정 생성과 초기화를 처리하는
+`npm run local:init`의 대응 명령입니다. source checkout 안에서는 아래의
+`npm run local:init`을 사용하세요.
+
+macOS의 개인 설정·스냅샷·내부 Git clone은 실행한 소스 폴더가 아니라 `~/Library/Application Support/KeepERD/`에 저장됩니다. 다른 checkout이나 worktree에서 실행해도 같은 KeepERD 데이터를 사용하며, 로컬 입력은 실제 절대 경로로 구분됩니다.
+
+설정 파일을 직접 만들거나 `local:sync`, `local:build`를 각각 실행할 필요가 없습니다. 실패하면 문제를 해결하고 같은 명령을 다시 실행하세요. 기존 설정·스냅샷과 완료한 빌드는 재사용합니다.
+
+**GitHub에 push하기 전 로컬 저장소부터 보려면** GitHub CLI 로그인 없이 다음처럼 로컬 경로를 등록하고 로컬 브랜치의 첫 ERD를 생성할 수 있습니다. 의존성 설치·최초 Docker 이미지 준비에는 인터넷이 필요할 수 있습니다.
+
+```sh
+keeperd init --local=/Users/you/Documents/code/backend --branch=main
+```
+
+서버 실행 후 입력 출처를 **로컬 저장소**로 바꾸세요. 다른 clone/worktree는 화면에서 절대 경로로 등록할 수 있습니다. 처음부터 미커밋 변경을 보려면 초기화 후 **작업 중 변경 포함 → Sync**를 누릅니다.
+
+<br />
+
+### 3. 실행하고 브라우저 열기
+
+```sh
+keeperd start
+```
+
+`keeperd start`는 설치된 패키지에서 `npm run local:start`에 대응하는 명령입니다. 브라우저에서 **[http://localhost:18777/](http://localhost:18777/)** 을 여세요. 현재 GitHub CLI 로그인 계정의 프로필과 이름이 표시됩니다. 그 아래에서 **조직/계정 → 레포 → 브랜치 → Sync**를 선택하면 해당 ERD가 열립니다. **저장된 ERD 관리** 버튼으로 별도 페이지에서 기존 ERD를 필터링해 열거나 선택 삭제할 수 있습니다. 브라우저는 직접 엽니다.
+
+터미널 Sync가 필요하면 `keeperd sync --repository=GitHub_URL --branch=main`처럼 사용합니다. 인증이 없거나 만료됐으면 메인 화면의 안내대로 서버를 실행한 컴퓨터의 터미널에서 `gh auth login --hostname github.com --git-protocol https --web` → `gh auth setup-git` → `gh auth status`를 실행하고 **로그인 다시 확인**을 누르세요. 별도 웹 로그인 폼이나 서버 재시작은 필요 없습니다. 기존 ERD·배치는 그대로 보관됩니다.
+
+다음부터 Homebrew 설치본에서는 `keeperd start`만 실행하면 됩니다. 스키마 최신화는 Docker를 켜고 **레포 → 브랜치 → Sync**를 누르세요.
+
+다른 브라우저·프로필·컴퓨터로 배치와 색상을 옮기려면 ERD 화면의 **작업 데이터 공유**를 사용하세요. 보내는 쪽에서 JSON을 내보낸 뒤 받는 쪽에서 같은 레포·브랜치·커밋의 ERD를 Sync하고 파일을 적용합니다. 스키마는 바뀌지 않으며 테이블 배치·크기·색상, Area, 메모만 옮겨집니다. 적용 전 상태는 자동 백업되어 한 번 되돌릴 수 있습니다.
+
+포트를 지정하려면 `LOCAL_ERD_PORT=18777 keeperd start`로 실행하고 표시된 주소를 엽니다. 포트·호스트명이 바뀌면 브라우저 배치 저장 공간도 달라지므로 기존 배치는 JSON으로 내보내 가져오세요.
+
+서버 터미널은 실행 상태로 두고, 종료할 때 `Ctrl+C`를 누릅니다. 배치는 같은 브라우저·주소에 저장됩니다. 자세한 저장·백업 설명은 [커스텀 기능 사용법](README.md)을 확인하세요.
+
+같은 전역 데이터 폴더를 사용하는 `keeperd start`, `keeperd sync`, 마이그레이션은 동시에 실행할 수 없습니다. 이미 서버가 실행 중이면 기존 주소를 안내하므로 그 서버를 사용하거나 먼저 종료하세요.
+
+<br />
+
+### 4. 소스 checkout에서 실행
+
+개발, 기여, 수동 소스 기반 실행에는 source checkout을 사용하세요. Node.js 22 이상, Git, 실행 중인 Docker가 필요합니다. 원격 GitHub 모드에서만 GitHub CLI (`gh`) 로그인도 필요합니다.
 
 코드를 보관할 상위 디렉터리에서 실행합니다. 이미 `keeperd` 폴더가 있다면 다른 위치를 선택하세요.
 
@@ -42,13 +92,7 @@ cd keeperd
 npm run local:init
 ```
 
-명령은 개인 설정 생성 → 의존성 설치 → 로컬 빌드를 처리합니다. 수 분이 걸릴 수 있습니다. 완료 후 서버를 실행해 화면에서 GitHub 저장소와 브랜치를 선택하고 Sync합니다.
-
-Homebrew 등으로 KeepERD를 설치한 뒤에는 같은 흐름을 `keeperd init`으로 실행합니다. 소스 checkout에서 개발할 때는 위의 `npm run local:init`을 계속 사용합니다.
-
-macOS의 개인 설정·스냅샷·내부 Git clone은 실행한 소스 폴더가 아니라 `~/Library/Application Support/KeepERD/`에 저장됩니다. 다른 checkout이나 worktree에서 실행해도 같은 KeepERD 데이터를 사용하며, 로컬 입력은 실제 절대 경로로 구분됩니다.
-
-설정 파일을 직접 만들거나 `local:sync`, `local:build`를 각각 실행할 필요가 없습니다. 실패하면 문제를 해결하고 같은 명령을 다시 실행하세요. 기존 설정·스냅샷과 완료한 빌드는 재사용합니다.
+명령은 개인 설정 생성 → 의존성 설치 → 로컬 빌드를 처리합니다. 수 분이 걸릴 수 있습니다. 완료 후 아래 명령으로 서버를 실행해 화면에서 GitHub 저장소와 브랜치를 선택하고 Sync합니다. 설치된 패키지에서는 이 초기화를 `keeperd init`으로 실행하지만, source checkout에서는 위의 `npm run local:init`을 계속 사용합니다.
 
 clone에서 고르는 것은 KeepERD 소스 버전이고, 화면에서 고르는 것은 백엔드 스키마 브랜치입니다.
 
@@ -62,27 +106,13 @@ npm run local:init -- --local=/Users/you/Documents/code/backend --branch=main
 
 <br />
 
-### 3. 실행하고 브라우저 열기
-
 ```sh
 npm run local:start
 ```
 
-브라우저에서 **[http://localhost:18777/](http://localhost:18777/)** 을 여세요. 현재 GitHub CLI 로그인 계정의 프로필과 이름이 표시됩니다. 그 아래에서 **조직/계정 → 레포 → 브랜치 → Sync**를 선택하면 해당 ERD가 열립니다. **저장된 ERD 관리** 버튼으로 별도 페이지에서 기존 ERD를 필터링해 열거나 선택 삭제할 수 있습니다. 브라우저는 직접 엽니다.
+다음부터는 source checkout에서 `npm run local:start`만 실행하면 됩니다. KeepERD source version을 변경하거나 업데이트한 뒤에도 빌드가 현재 코드와 다를 때만 자동으로 다시 빌드합니다.
 
-패키지 설치본에서는 `keeperd start`를 사용합니다. 터미널 Sync가 필요하면 기존 `npm run local:sync -- --repository=GitHub_URL --branch=main`와 같은 인수를 `keeperd sync --repository=GitHub_URL --branch=main`으로 그대로 전달할 수 있습니다.
-
-인증이 없거나 만료됐으면 메인 화면의 안내대로 서버를 실행한 컴퓨터의 터미널에서 `gh auth login --hostname github.com --git-protocol https --web` → `gh auth setup-git` → `gh auth status`를 실행하고 **로그인 다시 확인**을 누르세요. 별도 웹 로그인 폼이나 서버 재시작은 필요 없습니다. 기존 ERD·배치는 그대로 보관됩니다.
-
-다음부터는 KeepERD 폴더에서 `npm run local:start`만 실행하면 됩니다. KeepERD source version을 변경하거나 업데이트한 뒤에도 빌드가 현재 코드와 다를 때만 자동으로 다시 빌드합니다. 스키마 최신화는 Docker를 켜고 **레포 → 브랜치 → Sync**를 누르세요.
-
-다른 브라우저·프로필·컴퓨터로 배치와 색상을 옮기려면 ERD 화면의 **작업 데이터 공유**를 사용하세요. 보내는 쪽에서 JSON을 내보낸 뒤 받는 쪽에서 같은 레포·브랜치·커밋의 ERD를 Sync하고 파일을 적용합니다. 스키마는 바뀌지 않으며 테이블 배치·크기·색상, Area, 메모만 옮겨집니다. 적용 전 상태는 자동 백업되어 한 번 되돌릴 수 있습니다.
-
-포트를 지정하려면 `LOCAL_ERD_PORT=18777 npm run local:start`로 실행하고 표시된 주소를 엽니다. 포트·호스트명이 바뀌면 브라우저 배치 저장 공간도 달라지므로 기존 배치는 JSON으로 내보내 가져오세요.
-
-서버 터미널은 실행 상태로 두고, 종료할 때 `Ctrl+C`를 누릅니다. 배치는 같은 브라우저·주소에 저장됩니다. 자세한 저장·백업 설명은 [커스텀 기능 사용법](README.md)을 확인하세요.
-
-같은 전역 데이터 폴더를 사용하는 `local:start`, `local:sync`, 마이그레이션은 동시에 실행할 수 없습니다. 이미 서버가 실행 중이면 기존 주소를 안내하므로 그 서버를 사용하거나 먼저 종료하세요.
+포트를 지정하려면 `LOCAL_ERD_PORT=18777 npm run local:start`로 실행하고 표시된 주소를 엽니다. 같은 전역 데이터 폴더를 사용하는 `local:start`, `local:sync`, 마이그레이션은 동시에 실행할 수 없습니다. 이미 서버가 실행 중이면 기존 주소를 안내하므로 그 서버를 사용하거나 먼저 종료하세요.
 
 ### 기존 `.local-erd` 가져오기
 
@@ -94,7 +124,18 @@ npm run local:migrate -- --from=/Users/you/code/keeperd/.local-erd
 
 <br />
 
-### 코드 업데이트
+### 업데이트
+
+Homebrew 설치본은 JSON 백업 후 서버를 종료하고 다음처럼 업데이트하세요.
+
+```sh
+brew update
+brew upgrade keeperd
+```
+
+기존 스키마·배치는 유지합니다. 다음 source checkout 절차는 개발·소스 기반 실행에만 적용됩니다.
+
+#### 소스 checkout 업데이트
 
 JSON 백업 후 서버를 종료하고, 직접 수정한 파일이 없는지 `git status --short`로 확인합니다. 공개 source checkout은 검증된 `vX.Y.Z` release tag 기준으로 업데이트하세요.
 
@@ -132,7 +173,7 @@ node keeperd-v0.1.0/bin/keeperd.mjs --help
 node keeperd-v0.1.0/bin/keeperd.mjs --version
 ```
 
-`craftdio/homebrew-keeperd` Formula는 `craftdio/keeperd` GitHub Release의 immutable tarball URL과 게시된 SHA256만 참조합니다. Homebrew Formula 작성과 갱신은 별도 단계이며 이 저장소의 Release workflow는 Homebrew repository를 수정하지 않습니다.
+[`craftdio/homebrew-keeperd`](https://github.com/craftdio/homebrew-keeperd) Formula는 `craftdio/keeperd` GitHub Release의 immutable tarball URL과 게시된 SHA256만 참조합니다. Homebrew Formula 작성과 갱신은 별도 단계이며 이 저장소의 Release workflow는 Homebrew repository를 수정하지 않습니다.
 
 <br />
 
