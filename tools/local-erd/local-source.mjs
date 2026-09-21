@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { realpathSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { canonicalRepository, validateBranch } from './branches.mjs';
+import { githubGitEnvironment } from './git-credentials.mjs';
 
 export class LocalSourceError extends Error {
     constructor(code, message) {
@@ -52,7 +53,7 @@ const git = (repo, ...args) =>
         timeout: 15000,
         maxBuffer: 32 * 1024 * 1024,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+        env: githubGitEnvironment(),
     });
 
 export function registerLocalRepository(input) {

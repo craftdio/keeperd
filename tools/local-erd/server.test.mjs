@@ -29,6 +29,7 @@ test(
                 'folder-picker.mjs',
                 'library-store.mjs',
                 'local-source.mjs',
+                'git-credentials.mjs',
                 'memory-cache.mjs',
                 'build-state.mjs',
                 'cli-command.mjs',

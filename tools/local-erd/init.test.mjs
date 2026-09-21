@@ -28,6 +28,7 @@ test(
                 'init.mjs',
                 'branches.mjs',
                 'local-source.mjs',
+                'git-credentials.mjs',
                 'build-state.mjs',
                 'cli-command.mjs',
                 'state-paths.mjs',

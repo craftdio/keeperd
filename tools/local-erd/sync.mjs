@@ -24,6 +24,7 @@ import { publishFiles } from './atomic-publish.mjs';
 import { stateDirectory } from './state-paths.mjs';
 import { acquireStateLock, StateLockError } from './state-lock.mjs';
 import { localCommand } from './cli-command.mjs';
+import { githubGitEnvironment } from './git-credentials.mjs';
 
 async function sync(state) {
     const root = path.dirname(fileURLToPath(import.meta.url));
@@ -92,6 +93,7 @@ async function sync(state) {
             maxBuffer: 64 * 1024 * 1024,
             timeout: 120000,
             stdio: ['pipe', 'pipe', 'pipe'],
+            env: cmd === 'git' ? githubGitEnvironment() : process.env,
         });
     const git = (...args) => run('git', ['-C', repo, ...args]);
     const id = (s) => createHash('sha256').update(s).digest('hex').slice(0, 24);

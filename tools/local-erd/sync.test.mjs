@@ -32,6 +32,7 @@ test(
                 'branches.mjs',
                 'cli-command.mjs',
                 'local-source.mjs',
+                'git-credentials.mjs',
                 'state-paths.mjs',
                 'state-lock.mjs',
                 'schema-diff.js',
