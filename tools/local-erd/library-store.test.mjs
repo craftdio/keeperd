@@ -147,6 +147,7 @@ test('serves the management page without GitHub auth and protects deletion APIs'
         'cli-command.mjs',
         'state-paths.mjs',
         'state-lock.mjs',
+        'node-command.mjs',
     ])
         await copyFile(path.join(source, name), path.join(root, name));
     await writeFile(

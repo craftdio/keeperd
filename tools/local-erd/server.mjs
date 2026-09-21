@@ -17,6 +17,7 @@ import { hasCurrentBuild } from './build-state.mjs';
 import { localCommand } from './cli-command.mjs';
 import { stateDirectory } from './state-paths.mjs';
 import { acquireStateLock } from './state-lock.mjs';
+import { nodeCommand } from './node-command.mjs';
 import {
     diagramKey,
     canonicalRepository,
@@ -137,7 +138,7 @@ function startSync(branch, repositoryUrl, primaryUrl, local, mode = 'commit') {
         progress: 3,
     };
     const child = spawn(
-        process.execPath,
+        nodeCommand(),
         [
             path.join(root, 'sync.mjs'),
             `--branch=${branch}`,

@@ -34,6 +34,7 @@ test(
                 'cli-command.mjs',
                 'state-paths.mjs',
                 'state-lock.mjs',
+                'node-command.mjs',
             ])
                 copyFileSync(
                     new URL(file, import.meta.url),
