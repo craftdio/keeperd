@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdirSync, existsSync } from 'node:fs';
+import {
+    readFileSync,
+    chmodSync,
+    mkdirSync,
+    existsSync,
+    mkdtempSync,
+    writeFileSync,
+    rmSync,
+} from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -25,6 +33,21 @@ import { stateDirectory } from './state-paths.mjs';
 import { acquireStateLock, StateLockError } from './state-lock.mjs';
 import { localCommand } from './cli-command.mjs';
 import { githubGitEnvironment } from './git-credentials.mjs';
+import {
+    flywayDockerArguments,
+    isSchemaInputFile,
+    schemaInputPaths,
+    SchemaReplayError,
+} from './schema-replay.mjs';
+import {
+    alembicConfiguration,
+    alembicDockerArguments,
+    alembicEnvironment,
+    alembicHeadRevisions,
+    alembicRunnerDockerfile,
+} from './alembic-replay.mjs';
+import { airflowDockerArguments } from './airflow-replay.mjs';
+import { classifyGitError, SyncEnvironmentError } from './sync-errors.mjs';
 
 async function sync(state) {
     const root = path.dirname(fileURLToPath(import.meta.url));
@@ -86,15 +109,49 @@ async function sync(state) {
               })
           )
         : [];
-    const run = (cmd, args, input) =>
-        execFileSync(cmd, args, {
-            input,
-            encoding: 'utf8',
-            maxBuffer: 64 * 1024 * 1024,
-            timeout: 120000,
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: cmd === 'git' ? githubGitEnvironment() : process.env,
-        });
+    const run = (cmd, args, input) => {
+        try {
+            return execFileSync(cmd, args, {
+                input,
+                encoding: 'utf8',
+                maxBuffer: 64 * 1024 * 1024,
+                timeout: 120000,
+                stdio: ['pipe', 'pipe', 'pipe'],
+                env: cmd === 'git' ? githubGitEnvironment() : process.env,
+            });
+        } catch (error) {
+            if (cmd === 'git') throw classifyGitError(error, args);
+            if (
+                cmd === 'docker' &&
+                (/cannot connect to the docker daemon|is the docker daemon running|command not found|all predefined address pools|network .* not found/i.test(
+                    `${error.stderr ?? ''} ${error.message ?? ''}`
+                ) ||
+                    args[0] === 'network')
+            )
+                throw new SyncEnvironmentError(
+                    'DOCKER_UNAVAILABLE',
+                    'Docker 실행 환경을 준비하지 못했습니다. Docker Desktop과 네트워크 상태를 확인하세요.',
+                    { cause: error }
+                );
+            if (
+                cmd === 'docker' &&
+                args.some(
+                    (argument) =>
+                        argument.startsWith?.('redgate/flyway:') ||
+                        argument.startsWith?.('apache/airflow:')
+                ) &&
+                /pull access denied|manifest unknown|tls handshake timeout|i\/o timeout|no such host/i.test(
+                    `${error.stderr ?? ''} ${error.message ?? ''}`
+                )
+            )
+                throw new SyncEnvironmentError(
+                    'SCHEMA_RUNNER_UNAVAILABLE',
+                    '공식 스키마 실행 이미지를 준비하지 못했습니다. Docker 네트워크와 이미지 태그를 확인하세요.',
+                    { cause: error }
+                );
+            throw error;
+        }
+    };
     const git = (...args) => run('git', ['-C', repo, ...args]);
     const id = (s) => createHash('sha256').update(s).digest('hex').slice(0, 24);
     const container = `debut-erd-extract-${process.pid}`;
@@ -162,7 +219,7 @@ async function sync(state) {
           );
     const remoteCapture = (revision) => {
         const files = new Map();
-        for (const directory of ['db/schema', 'db/migration']) {
+        for (const directory of schemaInputPaths) {
             const names = git(
                 'ls-tree',
                 '-r',
@@ -172,14 +229,14 @@ async function sync(state) {
             )
                 .trim()
                 .split('\n')
-                .filter((name) => name.endsWith('.sql'));
+                .filter(isSchemaInputFile);
             for (const name of names)
                 files.set(name, git('show', `${revision}:${name}`));
         }
         return {
             sha: revision,
             files,
-            schemaSource: selectSchemaSource(files),
+            schemaSource: selectSchemaSource(files, repositoryUrl),
         };
     };
     const remoteComparisonBase = (branch) => {
@@ -258,6 +315,185 @@ async function sync(state) {
                 await new Promise((r) => setTimeout(r, 1000));
             }
         }
+        let alembicImageReady = false;
+        const ensureAlembicImage = (profile) => {
+            if (alembicImageReady) return;
+            try {
+                run('docker', ['image', 'inspect', profile.alembicImage]);
+            } catch (error) {
+                if (error instanceof SyncEnvironmentError) throw error;
+                try {
+                    run(
+                        'docker',
+                        ['build', '--tag', profile.alembicImage, '-'],
+                        alembicRunnerDockerfile(profile)
+                    );
+                } catch (error) {
+                    if (error instanceof SyncEnvironmentError) throw error;
+                    throw new SyncEnvironmentError(
+                        'SCHEMA_RUNNER_UNAVAILABLE',
+                        'Alembic 실행 이미지를 준비하지 못했습니다. Docker 빌드 네트워크와 Python 이미지 접근을 확인하세요.',
+                        { cause: error }
+                    );
+                }
+            }
+            alembicImageReady = true;
+        };
+        const replayDatabase = (database, replayInput, progress) => {
+            const { schemaSource } = replayInput;
+            if (schemaSource.kind === 'airflow-metadata') {
+                try {
+                    progress?.(
+                        `${schemaSource.label} 재현 중 · Airflow ${schemaSource.profile.airflowVersion}`
+                    );
+                    run(
+                        'docker',
+                        airflowDockerArguments({
+                            profile: schemaSource.profile,
+                            container,
+                            database,
+                        })
+                    );
+                } catch (error) {
+                    if (error instanceof SyncEnvironmentError) throw error;
+                    throw new SchemaReplayError(
+                        'SCHEMA_REPLAY_FAILED',
+                        `Airflow ${schemaSource.profile.airflowVersion} 메타 DB 재현에 실패했습니다. 공식 이미지와 PostgreSQL 호환성을 확인하세요. DAG·수집·Batch는 실행되지 않았고 기존 ERD는 유지됩니다.`,
+                        { cause: error }
+                    );
+                }
+                return;
+            }
+            if (schemaSource.kind === 'alembic') {
+                const workspace = mkdtempSync(path.join(state, 'alembic-'));
+                try {
+                    chmodSync(workspace, 0o755);
+                    ensureAlembicImage(schemaSource.profile);
+                    for (const file of schemaSource.revisions) {
+                        const targetFile = path.join(workspace, file);
+                        mkdirSync(path.dirname(targetFile), {
+                            recursive: true,
+                            mode: 0o755,
+                        });
+                        writeFileSync(targetFile, replayInput.files.get(file));
+                    }
+                    writeFileSync(
+                        path.join(workspace, 'alembic.ini'),
+                        alembicConfiguration()
+                    );
+                    mkdirSync(path.join(workspace, 'alembic'), {
+                        recursive: true,
+                        mode: 0o755,
+                    });
+                    writeFileSync(
+                        path.join(workspace, 'alembic/env.py'),
+                        alembicEnvironment(schemaSource.profile)
+                    );
+                    const runAlembic = (command) =>
+                        run(
+                            'docker',
+                            alembicDockerArguments({
+                                profile: schemaSource.profile,
+                                container,
+                                database,
+                                workspace,
+                                command,
+                            })
+                        );
+                    const heads = alembicHeadRevisions(runAlembic(['heads']));
+                    if (heads.length !== 1)
+                        throw new SchemaReplayError(
+                            'SCHEMA_CONFIGURATION_AMBIGUOUS',
+                            `Alembic head가 ${heads.length}개입니다. merge revision으로 단일 head를 만든 뒤 다시 시도하세요. 기존 ERD는 유지됩니다.`
+                        );
+                    progress?.(
+                        `${schemaSource.label} 재현 중 · revision ${schemaSource.revisions.length}개`
+                    );
+                    runAlembic(['upgrade', 'head']);
+                } catch (error) {
+                    if (
+                        error instanceof SyncEnvironmentError ||
+                        error instanceof SchemaReplayError
+                    )
+                        throw error;
+                    throw new SchemaReplayError(
+                        'SCHEMA_REPLAY_FAILED',
+                        'Alembic revision 재현에 실패했습니다. revision 의존성과 PostgreSQL 호환성을 확인하세요. 기존 ERD는 유지됩니다.',
+                        { cause: error }
+                    );
+                } finally {
+                    rmSync(workspace, { recursive: true, force: true });
+                }
+                return;
+            }
+            if (schemaSource.kind === 'flyway') {
+                const workspace = mkdtempSync(path.join(state, 'flyway-'));
+                try {
+                    for (const file of schemaSource.files) {
+                        const relative = file.slice(schemaSource.prefix.length);
+                        const targetFile = path.join(workspace, relative);
+                        mkdirSync(path.dirname(targetFile), {
+                            recursive: true,
+                        });
+                        writeFileSync(targetFile, replayInput.files.get(file));
+                    }
+                    progress?.(
+                        `${schemaSource.label} 재현 중 · ${schemaSource.files.length}개`
+                    );
+                    run(
+                        'docker',
+                        flywayDockerArguments({
+                            profile: schemaSource.profile,
+                            network: `container:${container}`,
+                            databaseHost: 'localhost',
+                            database,
+                            migrationDirectory: workspace,
+                        })
+                    );
+                } catch (error) {
+                    if (error instanceof SyncEnvironmentError) throw error;
+                    throw new SchemaReplayError(
+                        'SCHEMA_REPLAY_FAILED',
+                        `${schemaSource.label} 재현에 실패했습니다. 마이그레이션 SQL과 Flyway 설정을 확인하세요. 기존 ERD는 유지됩니다.`,
+                        { cause: error }
+                    );
+                } finally {
+                    rmSync(workspace, { recursive: true, force: true });
+                }
+                return;
+            }
+            for (const [index, file] of schemaSource.files.entries()) {
+                progress?.(
+                    `${schemaSource.label} 재현 중 · ${index + 1}/${schemaSource.files.length}`
+                );
+                try {
+                    run(
+                        'docker',
+                        [
+                            'exec',
+                            '-i',
+                            container,
+                            'psql',
+                            '-X',
+                            '-q',
+                            '-v',
+                            'ON_ERROR_STOP=1',
+                            '-U',
+                            'postgres',
+                            '-d',
+                            database,
+                        ],
+                        replayInput.files.get(file)
+                    );
+                } catch (error) {
+                    throw new SchemaReplayError(
+                        'SCHEMA_REPLAY_FAILED',
+                        `${schemaSource.label} ${file} 적용에 실패했습니다. 기존 ERD는 유지됩니다.`,
+                        { cause: error }
+                    );
+                }
+            }
+        };
         for (const [branchIndex, branch] of branches.entries()) {
             const input = captures?.get(branch);
             if (input && remoteCheck?.commit === input.sha) {
@@ -292,36 +528,11 @@ async function sync(state) {
                 'postgres',
                 key,
             ]);
-            for (const [index, file] of files.entries()) {
+            replayDatabase(key, replayInput, (detail) =>
                 console.log(
-                    `PROGRESS ${Math.round(10 + (80 * (branchIndex + index / files.length)) / branches.length)} ${branch} ${schemaSource.label} 재현 중 · ${index + 1}/${files.length}`
-                );
-                try {
-                    run(
-                        'docker',
-                        [
-                            'exec',
-                            '-i',
-                            container,
-                            'psql',
-                            '-X',
-                            '-q',
-                            '-v',
-                            'ON_ERROR_STOP=1',
-                            '-U',
-                            'postgres',
-                            '-d',
-                            key,
-                        ],
-                        replayInput.files.get(file)
-                    );
-                } catch (error) {
-                    throw new Error(
-                        `${branch}: ${schemaSource.label} ${file} 적용 실패`,
-                        { cause: error }
-                    );
-                }
-            }
+                    `PROGRESS ${Math.round(10 + (80 * branchIndex) / branches.length)} ${branch} ${detail}`
+                )
+            );
             const raw = JSON.parse(
                 run(
                     'docker',
@@ -368,25 +579,7 @@ async function sync(state) {
                         'postgres',
                         baseDatabase,
                     ]);
-                    for (const file of baseInput.schemaSource.files)
-                        run(
-                            'docker',
-                            [
-                                'exec',
-                                '-i',
-                                container,
-                                'psql',
-                                '-X',
-                                '-q',
-                                '-v',
-                                'ON_ERROR_STOP=1',
-                                '-U',
-                                'postgres',
-                                '-d',
-                                baseDatabase,
-                            ],
-                            baseInput.files.get(file)
-                        );
+                    replayDatabase(baseDatabase, baseInput);
                     const baseRaw = JSON.parse(
                         run(
                             'docker',
@@ -625,7 +818,13 @@ async function sync(state) {
                     files: files.length,
                 },
                 migrations:
-                    schemaSource.kind === 'sql-migrations' ? files.length : 0,
+                    schemaSource.kind === 'alembic'
+                        ? schemaSource.revisions.length
+                        : ['sql-migrations', 'flyway'].includes(
+                                schemaSource.kind
+                            )
+                          ? files.length
+                          : 0,
                 tables: tables.length,
                 relationships: relationships.length,
             });
@@ -657,7 +856,12 @@ async function sync(state) {
             },
         ]);
     } finally {
-        if (started) run('docker', ['stop', container]);
+        if (started)
+            try {
+                run('docker', ['stop', container]);
+            } catch {
+                /* Preserve the original sync failure. */
+            }
     }
 }
 const state = stateDirectory();
@@ -669,13 +873,17 @@ try {
     console.error(
         JSON.stringify({
             code:
-                error instanceof LocalSourceError
+                error instanceof LocalSourceError ||
+                error instanceof SchemaReplayError ||
+                error instanceof SyncEnvironmentError
                     ? error.code
                     : error instanceof StateLockError
                       ? 'KEEPERD_ALREADY_RUNNING'
                       : 'SYNC_FAILED',
             error:
                 error instanceof LocalSourceError ||
+                error instanceof SchemaReplayError ||
+                error instanceof SyncEnvironmentError ||
                 error instanceof StateLockError
                     ? error.message
                     : '스키마 재현에 실패했습니다. 선언 스키마 또는 마이그레이션과 실행 환경을 확인하세요. 기존 ERD는 유지됩니다.',

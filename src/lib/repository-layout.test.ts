@@ -59,7 +59,8 @@ it('hides absent groups without losing their geometry on a round trip', () => {
 it('shares positions across branches without copying schema or table IDs and preserves absent tables', () => {
     const feature = diagram('feature', ['users', 'profiles']);
     feature.tables![0].x = 900;
-    feature.tables![1].color = 'green';
+    feature.tables![0].color = '#0FA958';
+    feature.tables![1].color = '#FF6363';
     const layout = captureRepositoryLayout('repo', feature);
     const develop = applyRepositoryLayout(
         diagram('develop', ['users']),
@@ -67,6 +68,7 @@ it('shares positions across branches without copying schema or table IDs and pre
     );
     expect(develop.tables).toHaveLength(1);
     expect(develop.tables![0].x).toBe(900);
+    expect(develop.tables![0].color).toBe('#0FA958');
     expect(develop.tables![0].id).toBe('develop-users');
     expect(develop.tables![0].fields[0].id).toBe('develop-users-field');
     develop.tables![0].x = 42;
@@ -75,7 +77,8 @@ it('shares positions across branches without copying schema or table IDs and pre
         captureRepositoryLayout('repo', develop, layout)
     );
     expect(back.tables![0].x).toBe(42);
-    expect(back.tables![1].color).toBe('green');
+    expect(back.tables![0].color).toBe('#0FA958');
+    expect(back.tables![1].color).toBe('#FF6363');
 });
 it('scopes shared Area and note IDs per diagram, retaining edits and explicit removal', () => {
     const feature = diagram('feature', ['users']);

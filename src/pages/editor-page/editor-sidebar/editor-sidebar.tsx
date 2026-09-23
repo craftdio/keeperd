@@ -24,11 +24,12 @@ import { useTranslation } from 'react-i18next';
 import { useBreakpoint } from '@/hooks/use-breakpoint';
 import ChartDBLogo from '@/assets/logo-light.png';
 import ChartDBDarkLogo from '@/assets/logo-dark.png';
-import { useTheme } from '@/hooks/use-theme';
+import { EditorBrand } from '../top-navbar/editor-brand';
 import { useChartDB } from '@/hooks/use-chartdb';
 import { supportsCustomTypes } from '@/lib/domain/database-capabilities';
 import { useDialog } from '@/hooks/use-dialog';
 import { Separator } from '@/components/separator/separator';
+import { SidebarToggle } from './sidebar-toggle';
 
 export interface SidebarItem {
     title: string;
@@ -49,7 +50,6 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = () => {
     } = useLayout();
     const { t } = useTranslation();
     const { isMd: isDesktop } = useBreakpoint('md');
-    const { effectiveTheme } = useTheme();
     const { databaseType } = useChartDB();
     const { openCreateDiagramDialog, openOpenDiagramDialog } = useDialog();
 
@@ -138,22 +138,6 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = () => {
         ]
     );
 
-    const footerItems: SidebarItem[] = useMemo(
-        () => [
-            {
-                title: 'GitHub Issues',
-                icon: BookOpen,
-                onClick: () =>
-                    window.open(
-                        'https://github.com/craftdio/keeperd/issues',
-                        '_blank'
-                    ),
-                active: false,
-            },
-        ],
-        []
-    );
-
     return (
         <Sidebar
             side="left"
@@ -161,25 +145,18 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = () => {
             variant="sidebar"
             className="relative h-full"
         >
-            {!isDesktop ? (
-                <SidebarHeader>
-                    <a
-                        href="https://github.com/craftdio/keeperd"
-                        className="cursor-pointer"
-                        rel="noreferrer"
-                    >
-                        <img
-                            src={
-                                effectiveTheme === 'light'
-                                    ? ChartDBLogo
-                                    : ChartDBDarkLogo
-                            }
-                            alt="KeepERD"
-                            className="h-4 max-w-fit"
-                        />
-                    </a>
+            {isDesktop ? (
+                <SidebarHeader className="items-center border-b p-2">
+                    <SidebarToggle />
                 </SidebarHeader>
-            ) : null}
+            ) : (
+                <SidebarHeader>
+                    <EditorBrand
+                        lightLogo={ChartDBLogo}
+                        darkLogo={ChartDBDarkLogo}
+                    />
+                </SidebarHeader>
+            )}
             <SidebarContent>
                 <SidebarGroup>
                     {/* <SidebarGroupLabel /> */}
@@ -239,25 +216,29 @@ export const EditorSidebar: React.FC<EditorSidebarProps> = () => {
 
             <SidebarFooter>
                 <SidebarMenu>
-                    {footerItems.map((item) => (
-                        <SidebarMenuItem key={item.title}>
-                            {item.badge && (
-                                <span className="absolute -right-1 -top-1 rounded-full bg-pink-500 px-[3px] py-px text-[8px] font-semibold text-white">
-                                    {item.badge}
-                                </span>
-                            )}
-                            <SidebarMenuButton
-                                className="justify-center space-y-0.5 !px-0 hover:bg-gray-200 data-[active=true]:bg-gray-100 data-[active=true]:text-pink-600 data-[active=true]:hover:bg-pink-100 dark:hover:bg-gray-800 dark:data-[active=true]:bg-gray-900 dark:data-[active=true]:text-pink-400 dark:data-[active=true]:hover:bg-pink-950"
-                                isActive={item.active}
-                                asChild
+                    <SidebarMenuItem>
+                        <SidebarMenuButton
+                            className="justify-center space-y-0.5 !px-0 hover:bg-gray-200 dark:hover:bg-gray-800"
+                            asChild
+                        >
+                            <a
+                                href="https://github.com/chartdb/chartdb"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label="ChartDB Source"
                             >
-                                <button onClick={item.onClick}>
-                                    <item.icon />
-                                    <span>{item.title}</span>
-                                </button>
-                            </SidebarMenuButton>
-                        </SidebarMenuItem>
-                    ))}
+                                <BookOpen aria-hidden="true" />
+                                <span
+                                    aria-hidden="true"
+                                    className="text-center leading-tight"
+                                >
+                                    ChartDB
+                                    <br />
+                                    Source
+                                </span>
+                            </a>
+                        </SidebarMenuButton>
+                    </SidebarMenuItem>
                 </SidebarMenu>
             </SidebarFooter>
         </Sidebar>

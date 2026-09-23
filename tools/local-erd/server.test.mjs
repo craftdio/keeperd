@@ -29,13 +29,17 @@ test(
                 'folder-picker.mjs',
                 'library-store.mjs',
                 'local-source.mjs',
+                'schema-replay.mjs',
+                'sync-errors.mjs',
                 'git-credentials.mjs',
                 'memory-cache.mjs',
                 'build-state.mjs',
                 'cli-command.mjs',
                 'state-paths.mjs',
                 'state-lock.mjs',
+                'stop-control.mjs',
                 'node-command.mjs',
+                'open-browser.mjs',
             ])
                 copyFileSync(
                     new URL(file, import.meta.url),
@@ -78,6 +82,7 @@ test(
             child = spawn(process.execPath, [path.join(tools, 'server.mjs')], {
                 env: {
                     ...process.env,
+                    CI: 'true',
                     LOCAL_ERD_PORT: '0',
                     KEEPERD_STATE_DIR: path.join(root, '.local-erd'),
                 },

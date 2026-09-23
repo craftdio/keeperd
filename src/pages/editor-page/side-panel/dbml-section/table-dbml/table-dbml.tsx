@@ -61,6 +61,7 @@ export const TableDBML: React.FC<TableDBMLProps> = () => {
     const [isEditButtonEmphasized, setIsEditButtonEmphasized] = useState(false);
 
     const editorRef = useRef<monaco.editor.IStandaloneCodeEditor>();
+    const monacoRef = useRef<Monaco>();
     const decorationsCollection =
         useRef<monaco.editor.IEditorDecorationsCollection>();
     const completionManagerRef = useRef<DBMLCompletionManager>();
@@ -71,6 +72,7 @@ export const TableDBML: React.FC<TableDBMLProps> = () => {
             monacoInstance: Monaco
         ) => {
             editorRef.current = editor;
+            monacoRef.current = monacoInstance;
             decorationsCollection.current =
                 editor.createDecorationsCollection();
 
@@ -250,6 +252,7 @@ export const TableDBML: React.FC<TableDBMLProps> = () => {
                         model: editorRef.current?.getModel(),
                         editorDecorationsCollection:
                             decorationsCollection.current,
+                        monacoInstance: monacoRef.current,
                     });
 
                     setErrorMessage(

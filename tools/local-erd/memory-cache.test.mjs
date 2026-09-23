@@ -60,3 +60,23 @@ test('coalesces concurrent requests and does not cache failures', async () => {
     );
     assert.equal(failures, 2);
 });
+
+test('a slow old request cannot overwrite a forced branch refresh', async () => {
+    const cache = createMemoryCache();
+    let finishOld;
+    const old = cache.get(
+        'branches',
+        () => new Promise((resolve) => (finishOld = resolve))
+    );
+    await Promise.resolve();
+    assert.deepEqual(
+        await cache.get('branches', async () => ['new'], { refresh: true }),
+        { value: ['new'], cached: false }
+    );
+    finishOld(['old']);
+    assert.deepEqual((await old).value, ['old']);
+    assert.deepEqual(await cache.get('branches', async () => ['unused']), {
+        value: ['new'],
+        cached: true,
+    });
+});

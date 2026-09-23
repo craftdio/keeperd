@@ -14,13 +14,15 @@ KeepERD는 ChartDB에 GitHub 레포·브랜치별 PostgreSQL ERD와 **레포 선
 
 준비물부터 clone·인증·설정·빌드·브라우저 실행까지는 **[설치·실행 가이드](SETUP.md)**를 순서대로 따라온다.
 
-최초 준비는 `npm run local:init` 한 번으로 처리한다. 저장소 URL을 입력하면 설정·의존성 설치·첫 스키마 생성·빌드를 자동 수행한다. 다음부터는 `npm run local:start`만 실행한다. `local:start`는 ChartDB 코드가 바뀌었거나 빌드가 없을 때만 현재 코드로 자동 빌드한다.
+최초 준비는 `npm run local:init` 한 번으로 처리한다. 저장소 URL을 입력하면 설정·의존성 설치·첫 스키마 생성·빌드를 자동 수행한다. 다음부터는 `npm run local:start`만 실행한다. `local:start`는 ChartDB 코드가 바뀌었거나 빌드가 없을 때만 현재 코드로 자동 빌드한다. 서버 준비가 끝나면 macOS 기본 브라우저에서 실제 `localhost` 주소를 한 번 연다. 자동 열기를 끄려면 `npm run local:start -- --no-open`(설치본은 `keeperd start --no-open`)을 사용한다. CI·SSH 또는 브라우저 실행 실패 시에는 터미널에 표시된 주소를 직접 열면 된다. 최근 사용한 브라우저·프로필은 추측하지 않는다.
 
 ## 계정·레포·브랜치 선택과 Sync
 
 Sync 화면: [http://localhost:18777/](http://localhost:18777/) · [저장된 ERD 관리](http://localhost:18777/saved)
 
 `npm run local:start`로 시작하고 메인 화면에서 **조직/계정 → 레포 → 브랜치 → Sync**를 누른다. 진행률을 표시하고 성공하면 선택한 레포·브랜치의 ERD를 연다. 레포 선택은 브랜치 목록만 바꾸며, Sync를 누르기 전에는 새 스키마를 생성하지 않는다. 메인의 **저장된 ERD 관리**는 선택한 조직·레포로 필터링한 관리 페이지를 연다. ERD 화면 오른쪽 위에는 브랜치와 Sync만 표시한다. 상단의 **레포·브랜치 제목**을 누르면 조직/계정·레포·브랜치를 다시 골라 Sync 후 이동할 수 있다. 로컬 ERD에서는 이 제목을 직접 수정하지 않는다.
+
+다른 터미널에서 서버를 종료할 때는 `npm run local:stop`(설치본은 `keeperd stop`)을 사용한다. 현재 사용자 데이터 폴더의 서버만 확인해 종료하며, Sync 중이거나 잠금 소유자를 확인할 수 없으면 종료하지 않는다. 기존 설정·스냅샷·브라우저 작업 데이터는 지우지 않는다.
 
 - 중앙 프로필 이미지·이름·아이디는 **현재 서버의 GitHub CLI 로그인 계정** 기준이다. 브라우저의 github.com 로그인과 다를 수 있다. 계정을 바꾸려면 `gh auth switch` 또는 `gh auth login` 후 화면의 계정·레포 목록 새로고침을 누른다.
 - 인증이 없거나 만료됐으면 메인 화면에 터미널 로그인 안내가 표시되고 **GitHub 원격 입력의** 조직·레포 선택과 Sync만 잠긴다. **로컬 저장소 입력은 GitHub 로그인 없이 계속 선택하고 Sync할 수 있다.** 서버를 실행한 컴퓨터의 터미널에서 아래 명령을 실행하고 **로그인 다시 확인**을 누른다. 서버 재시작은 필요 없으며 기존 ERD·배치는 삭제되지 않는다. `gh`가 없다면 GitHub CLI를 먼저 설치한다. 네트워크·권한 오류는 로그인 오류와 별도로 안내한다.
@@ -33,9 +35,9 @@ gh auth status
 
 - 개인 소유·협업·조직 멤버십으로 접근할 수 있는 레포를 페이지 끝까지 조회한다. 검색창으로 이름을 좁히고 레포를 선택한다. 마지막 선택은 이 브라우저에 저장한다.
 - 레포마다 최초 Sync 시 별도 복제본을 만들며, 서버 하나에서 여러 레포를 번갈아 볼 수 있다. 같은 `main`·`develop` 이름이어도 레포별 ERD와 배치가 분리된다. 다른 레포의 기존 스냅샷은 삭제하지 않는다.
-- **PostgreSQL 17용 `db/schema/*.sql` 선언 스키마를 우선 사용**하고, 선언 스키마가 없는 레포는 `db/migration/*.sql`을 순서대로 재생한다. 두 경로가 모두 있으면 migration은 CI·배포용 파생 이력으로 보고 실행하지 않는다. 목록에 표시되는 모든 레포가 동기화 가능한 것은 아니며, 지원할 SQL이 없거나 적용에 실패하면 새 ERD를 게시하지 않고 기존 데이터를 유지한다.
+- **PostgreSQL 17용 `db/schema/*.sql` 선언 스키마를 우선 사용**하고, 선언 스키마가 없는 레포는 `db/migration/*.sql`을 순서대로 재생한다. 두 경로가 모두 있으면 migration은 CI·배포용 파생 이력으로 보고 실행하지 않는다. 아래에 등록된 저장소는 Flyway SQL, Alembic Python revision 또는 Airflow 자체 메타 DB를 각 도구의 규칙으로 실행한다. 목록에 표시되는 모든 레포가 동기화 가능한 것은 아니며, 지원할 입력이 없거나 적용에 실패하면 새 ERD를 게시하지 않고 기존 데이터를 유지한다.
 
-- 목록은 로컬 서버가 `gh api`로 GitHub에서 페이지 끝까지 조회한다. 인증 토큰은 브라우저에 전달하지 않는다. 계정·레포·저장소별 브랜치 목록은 서버가 실행되는 동안 메모리에 보관하므로 화면을 다시 열 때 GitHub를 매번 조회하지 않는다. **계정·레포 목록 새로고침**이나 브랜치 옆 `↻`을 누르면 캐시를 무시하고 즉시 갱신하며, 서버를 종료하면 캐시는 사라진다.
+- 목록은 로컬 서버가 `gh api`로 GitHub에서 페이지 끝까지 조회한다. 인증 토큰은 브라우저에 전달하지 않는다. 계정·레포·저장소별 브랜치 목록은 서버가 실행되는 동안 메모리에 보관하므로 화면을 다시 열 때 GitHub를 매번 조회하지 않는다. 홈의 **계정·레포·선택 브랜치 새로고침**은 계정과 레포 및 현재 선택한 원격 레포의 브랜치를 갱신한다. 홈의 브랜치 옆 `↻`과 ERD 이동 창의 **브랜치 목록 새로고침**은 선택한 저장소의 브랜치만 갱신한다(로컬 Git은 등록된 worktree를 다시 읽는다). 서버를 종료하면 캐시는 사라진다.
 - 현재 ERD의 브랜치를 기본 선택하며, 한 번의 Sync는 선택한 브랜치만 갱신한다. 다른 브랜치의 스냅샷과 배치는 유지한다.
 - Sync가 끝나면 로컬·원격 브랜치 모두 `develop`/`main` 중 가장 가까운 **공통 조상 커밋의 스키마**와 비교한다. 새 테이블과 필드, 정의가 바뀐 테이블과 필드는 형광 초록으로 표시하고 삭제된 항목은 상단 안내에 개수로 표시한다. 기준 커밋에 테이블이 없었다면 개별 테이블 대신 캔버스 전체에 큰 테두리를 표시한다. Git에는 실제 생성 출처가 기록되지 않으므로 화면에는 단정적인 “분기됨” 대신 `develop 공통 기준 1ab5a14`처럼 표시한다.
 - `/`, `#` 등이 있는 브랜치는 안정적인 해시 ID를 사용한다. 기존 develop/main URL은 유지한다. 생성한 ERD는 **저장된 ERD 관리** 페이지에서 다시 열 수 있다.
@@ -50,15 +52,61 @@ gh auth status
 메인 화면에서 **입력 출처 → 로컬 저장소**를 선택하고 서버 컴퓨터의 clone/worktree 절대 경로를 등록한다. HTTPS 또는 SSH GitHub origin이 필요하며 등록 정보는 KeepERD 전역 `config.json`에만 저장된다. 실제 절대 경로의 해시를 ID에 포함하므로 같은 원격 저장소를 여러 clone이나 worktree로 사용해도 서로 다른 로컬 입력으로 유지된다. GitHub 로그인 없이 로컬 브랜치를 조회하고 Sync할 수 있다.
 
 - **브랜치 커밋**: 로컬 Git refs의 커밋을 읽는다. push하지 않은 브랜치·커밋도 가능하며 다른 브랜치를 선택해도 checkout은 바꾸지 않는다.
-- **작업 중 변경 포함**: 현재 checkout 브랜치의 staged/unstaged·미추적 `db/schema`·`db/migration` SQL과 삭제를 캡처한다. 선언 스키마가 존재하면 해당 파일만 ERD 입력으로 사용한다. Git ignored 파일과 symlink는 제외/차단하며, 다른 브랜치나 detached HEAD에는 작업 변경을 적용하지 않는다.
+- **작업 중 변경 포함**: 현재 checkout 브랜치의 staged/unstaged·미추적 `db/schema`·`db/migration`, 등록된 Flyway SQL, Alembic 설정·env.py·revision, Airflow 버전 파일과 삭제를 캡처한다. 선언 스키마가 존재하면 해당 파일만 ERD 입력으로 사용한다. Git ignored 파일과 symlink는 제외/차단하며, 다른 브랜치나 detached HEAD에는 작업 변경을 적용하지 않는다.
 - **원격 반영 확인**: 사용자가 누를 때만 `git ls-remote`로 같은 이름의 원격 브랜치를 확인한다. checkout·fetch·stash·자동 commit/push를 하지 않는다. 조회 실패 또는 원격 커밋의 포함 관계를 비교할 수 없으면 미확인으로 안내한다. 결과는 확인 시점 기준이며 로컬 커밋이 바뀌면 재확인한다.
 - 화면과 카드에는 로컬 출처, commit, 입력 fingerprint와 캡처 시각을 표시한다. 미커밋 작업 변경은 원격에 반영되지 않은 로컬 변경임을 명시한다. Sync 중 파일을 편집하면 이미 캡처한 입력으로 진행하며, 캡처 중 변경을 감지하면 재시도를 안내한다.
 - 원격 ERD·로컬 브랜치 커밋·로컬 작업 중 ERD는 **서로 다른 ID로 저장**한다. worktree도 구분한다. 같은 소스를 다시 Sync하면 배치·색상이 유지되며, push 후에도 원격 ERD를 자동 덮어쓰지 않는다.
-- 로컬 입력도 **PostgreSQL 17용 `db/schema/*.sql`을 우선 재현**하고, 없으면 `db/migration/*.sql`을 사용한다. Atlas 선언형 레포는 CI가 migration을 생성하기 전에도 로컬 schema 변경을 볼 수 있다. 두 경로의 SQL이 아닌 모델·코드만 수정했다면 ERD 구조에는 반영되지 않는다. Flyway·Alembic·Airflow는 후속 이슈다.
+- 로컬 입력도 **PostgreSQL 17용 `db/schema/*.sql`을 우선 재현**하고, 없으면 `db/migration/*.sql`을 사용한다. 등록된 Flyway/Alembic/Airflow 저장소는 커밋/작업 폴더의 버전·마이그레이션 입력을 같은 격리 실행기로 재현한다. Atlas 선언형 레포는 CI가 migration을 생성하기 전에도 로컬 schema 변경을 볼 수 있다. 지원 경로의 migration이나 버전 파일이 아닌 모델·코드만 수정했다면 ERD 구조에는 반영되지 않는다.
 
 CLI에서는 `npm run local:sync -- --local=등록ID --branch=main`을 사용하고 작업 변경을 포함하려면 `--worktree`를 추가한다. 최초 등록·준비는 `npm run local:init -- --local=/absolute/clone/path --branch=main`으로 할 수 있다.
 
-잘못된 경로·Git 루트·origin·ref·권한, 브랜치와 작업 폴더 불일치, 캡처 실패는 별도 오류로 안내한다. 실패해도 기존 ERD·배치는 유지한다. PostgreSQL은 외부 포트/네트워크 없이 메모리 512MiB·CPU 1·PID 128로 제한하고 외부 명령은 최대 120초에 종료한다. 선언 스키마와 마이그레이션 SQL 자체에 비밀값을 넣지 않는다.
+잘못된 경로·Git 루트·origin·ref·권한, 브랜치와 작업 폴더 불일치, 캡처 실패는 별도 오류로 안내한다. 실패해도 기존 ERD·배치는 유지한다. PostgreSQL과 migration runner는 외부 포트와 외부 네트워크가 없는 실행별 Docker 네트워크 namespace에서 메모리 512MiB·CPU 1·PID 128로 제한하고 외부 명령은 최대 120초에 종료한다. 선언 스키마와 migration 자체에 비밀값을 넣지 않는다.
+
+## Flyway·Alembic·Airflow 지원 설정과 안전 경계
+
+Flyway는 저장소마다 DB 버전·도구 버전·경로·대상 스키마·초기 준비가 명시된 경우에만 실행한다. 파일 이름의 문자열 정렬로 흉내 내지 않고 공식 Flyway의 versioned/repeatable 규칙에 맡긴다.
+
+| 저장소                               | PostgreSQL           | Flyway 이미지                  | 마이그레이션 경로                 | 대상/기본 스키마 | 초기 준비   |
+| ------------------------------------ | -------------------- | ------------------------------ | --------------------------------- | ---------------- | ----------- |
+| `NangmanAzit/myhouse-agent-backend`  | `postgres:17-alpine` | `redgate/flyway:11.7.2-alpine` | `src/main/resources/db/migration` | `myhouse_agent`  | 스키마 생성 |
+| `NangmanAzit/nangmanazit-data-batch` | `postgres:17-alpine` | `redgate/flyway:11.7.2-alpine` | `src/main/resources/db/migration` | `public`         | 없음        |
+
+실행기는 선택된 SQL만 임시 폴더에 복사해 read-only로 마운트한다. 운영 DB 주소·계정, 애플리케이션 환경 변수, 저장소 전체, 호스트 Docker socket은 Flyway 컨테이너에 전달하지 않는다. Spring Boot·Gradle·Batch job도 실행하지 않는다. 매 Sync마다 빈 임시 PostgreSQL DB에 적용하고 결과를 추출한 뒤 컨테이너·네트워크·임시 SQL을 제거한다. Flyway 이력 테이블은 ERD에서 제외한다.
+
+Alembic은 다음 명시적 프로필만 지원한다. `down_revision` graph는 Alembic 자체가 순회하며, `head`가 여러 개이면 어느 branch도 임의 선택하지 않고 설정 오류로 중단한다. 자세한 revision branch 동작은 [Alembic 공식 문서](https://alembic.sqlalchemy.org/en/latest/branches.html)를 따른다.
+
+| 저장소                        | PostgreSQL           | Python 이미지                  | Alembic/SQLAlchemy  | revision 경로           | 대상 스키마 |
+| ----------------------------- | -------------------- | ------------------------------ | ------------------- | ----------------------- | ----------- |
+| `NangmanAzit/myhouse-backend` | `postgres:17-alpine` | digest 고정 `python:3.14-slim` | `1.18.4` / `2.0.51` | `alembic/versions/*.py` | `myhouse`   |
+
+첫 실행은 고정 Python 이미지에 Alembic·SQLAlchemy·psycopg만 설치한 최소 runner 이미지를 빌드하며 이후 Docker cache를 재사용한다. 선택 입력의 `alembic.ini`, `alembic/env.py`, revision 존재 여부를 확인하지만 애플리케이션 모델을 import하는 원본 `env.py`는 실행하지 않는다. 대신 KeepERD의 최소 online 어댑터가 빈 DB에 `myhouse` 스키마를 준비하고 revision만 실행한다. runner는 비루트·read-only filesystem이며 revision 폴더만 read-only로 마운트한다. 운영 자격 증명, `.env`, 앱 코드, 저장소 전체, 호스트 Docker socket은 전달하지 않고 API 서버·worker도 시작하지 않는다. Alembic version table은 ERD에서 제외한다.
+
+Airflow는 다음 명시적 프로필만 지원한다. 선택한 브랜치의 세 파일에서 버전과 auth manager가 모두 일치해야 한다.
+
+| 저장소                                 | 버전 입력                                          | 공식 이미지                       | 메타 DB 명령         | auth manager |
+| -------------------------------------- | -------------------------------------------------- | --------------------------------- | -------------------- | ------------ |
+| `NangmanAzit/nangmanazit-data-airflow` | `Dockerfile`, `docker-compose.yml`, `.env.example` | `apache/airflow:3.3.1-python3.12` | `airflow db migrate` | FAB          |
+
+Airflow runner는 빈 임시 PostgreSQL DB와 같은 외부 통신 불가 network namespace에서 read-only로 실행한다. 대상 저장소, DAG, plugin, `.env`, 운영 credential, 업무 DB 주소와 Docker socket은 마운트하거나 전달하지 않는다. DAG processor·scheduler·API server·Collector·Batch를 시작하지 않으며 예제 DAG도 비활성화한다. 따라서 결과는 DAG가 사용하는 Batch/Domain DB가 아니라 **Airflow 메타 DB**다. 공식 문서대로 `airflow db migrate`만 실행하고 `alembic_version`은 ERD에서 제외한다. 같은 입력의 재실행은 Airflow migration 이력에 의해 멱등이다.
+
+현재 범위에는 일반 `schema.sql`, dump 복원, 기존 DB 접속/가져오기, ORM/Collector 모델 추론, PostgreSQL 이외 DB 엔진, 등록되지 않은 Flyway/Alembic/Airflow 설정이 포함되지 않는다. 자체 migration 원본 또는 공식 버전을 결정할 입력이 없는 저장소는 지원하지 않는다. 새 저장소나 Airflow 버전을 지원하려면 코드의 명시적 프로필과 실제 재현 테스트를 함께 추가한다.
+
+### 오류 코드와 대응
+
+| 코드                                                | 의미와 확인할 곳                                                                        |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `SCHEMA_SOURCE_NOT_FOUND`                           | 지원 migration 입력이 없음. 안내되는 실제 지원 경로 확인                                |
+| `SCHEMA_METHOD_UNSUPPORTED`                         | 방식은 감지했지만 저장소별 실행 설정이 없음. Sync 버튼은 입력을 다시 선택할 때까지 잠김 |
+| `SCHEMA_CONFIGURATION_MISSING`                      | 등록 프로필의 경로/파일이 부족함. Sync 버튼은 입력을 다시 선택할 때까지 잠김            |
+| `SCHEMA_CONFIGURATION_AMBIGUOUS`                    | Alembic head가 여러 개임. merge revision으로 단일 head를 만든 뒤 재시도                 |
+| `SCHEMA_VERSION_UNSUPPORTED`                        | Airflow/Python/auth manager 버전 불일치 또는 미지원. 세 버전 입력을 일치시킨 뒤 재시도  |
+| `SCHEMA_REPLAY_FAILED`                              | SQL/Flyway/Alembic/Airflow 실행 실패. 버전·revision·PostgreSQL 호환성 확인              |
+| `SCHEMA_RUNNER_UNAVAILABLE`                         | Flyway/Alembic/Airflow 이미지 준비 실패. Docker build/pull 네트워크와 이미지 확인       |
+| `GITHUB_AUTH_REQUIRED` / `GITHUB_PERMISSION_DENIED` | 각각 CLI 로그인 / 저장소 권한 확인                                                      |
+| `GITHUB_NETWORK_FAILED` / `GIT_BRANCH_NOT_FOUND`    | 각각 네트워크 / 선택 브랜치 확인                                                        |
+| `DOCKER_UNAVAILABLE`                                | Docker Desktop·daemon·Docker 네트워크 확인                                              |
+
+스키마 오류는 “실제 DB가 없다”는 뜻이 아니다. KeepERD는 운영 DB를 확인하지 않으며, 어느 단계가 실패했는지 위 코드로 구분한다. 모든 실패는 새 스냅샷 게시 전에 중단되므로 기존 ERD 구조와 브라우저의 배치·색상·메모가 유지된다.
 
 ## 저장된 ERD 관리와 용량 정리
 

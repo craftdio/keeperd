@@ -523,18 +523,23 @@ export const ChartDBProvider: React.FC<
                     return updatedTables as DBTable[];
                 }
 
-                return prevTables
+                const updatedById = new Map(
+                    updatedTables.map((table) => [table.id, table])
+                );
+                const result = prevTables
                     .map((prevTable) => {
-                        const updatedTable = updatedTables.find(
-                            (t) => t.id === prevTable.id
-                        );
+                        const updatedTable = updatedById.get(prevTable.id);
                         return updatedTable
-                            ? { ...prevTable, ...updatedTable }
+                            ? updatedTable === prevTable
+                                ? prevTable
+                                : { ...prevTable, ...updatedTable }
                             : prevTable;
                     })
-                    .filter((prevTable) =>
-                        updatedTables.some((t) => t.id === prevTable.id)
-                    );
+                    .filter((prevTable) => updatedById.has(prevTable.id));
+                return result.length === prevTables.length &&
+                    result.every((table, index) => table === prevTables[index])
+                    ? prevTables
+                    : result;
             };
 
             const prevTables = deepCopy(tables);
@@ -560,33 +565,44 @@ export const ChartDBProvider: React.FC<
                 )
             );
 
-            setRelationships((relationships) =>
-                relationships.filter(
-                    (relationship) =>
-                        !relationshipsToRemove.some(
-                            (r) => r.id === relationship.id
-                        )
-                )
-            );
+            if (relationshipsToRemove.length > 0) {
+                const removedIds = new Set(
+                    relationshipsToRemove.map((relationship) => relationship.id)
+                );
+                setRelationships((current) =>
+                    current.filter(
+                        (relationship) => !removedIds.has(relationship.id)
+                    )
+                );
+            }
 
-            setDependencies((dependencies) =>
-                dependencies.filter(
-                    (dependency) =>
-                        !dependenciesToRemove.some(
-                            (d) => d.id === dependency.id
-                        )
-                )
-            );
+            if (dependenciesToRemove.length > 0) {
+                const removedIds = new Set(
+                    dependenciesToRemove.map((dependency) => dependency.id)
+                );
+                setDependencies((current) =>
+                    current.filter(
+                        (dependency) => !removedIds.has(dependency.id)
+                    )
+                );
+            }
 
             setTables(updateTables);
 
-            events.emit({
-                action: 'remove_tables',
-                data: { tableIds: tablesToDelete.map((t) => t.id) },
-            });
+            if (tablesToDelete.length > 0) {
+                events.emit({
+                    action: 'remove_tables',
+                    data: { tableIds: tablesToDelete.map((t) => t.id) },
+                });
+            }
 
             const promises = [];
+            const previousById = new Map(
+                tables.map((table) => [table.id, table])
+            );
             for (const updatedTable of updatedTables) {
+                if (previousById.get(updatedTable.id) === updatedTable)
+                    continue;
                 promises.push(
                     db.putTable({
                         diagramId,

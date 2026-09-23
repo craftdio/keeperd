@@ -39,6 +39,9 @@ function fixture(version = '0.1.0') {
     write('dist/old.js', 'old bundle');
     write('dist/.keeperd-build.json', '{"sourceRevision":"source"}\n');
     write('tools/local-erd/server.mjs', 'runtime server');
+    write('tools/local-erd/stop.mjs', 'runtime stop client');
+    write('tools/local-erd/stop-control.mjs', 'runtime stop proof');
+    write('tools/local-erd/open-browser.mjs', 'runtime browser opener');
     write('tools/local-erd/schema-diff.js', 'runtime diff');
     write('tools/local-erd/introspect.sql', 'select 1;');
     write(
@@ -92,6 +95,9 @@ test('creates a portable runtime archive with a source-controlled version and ch
             'bin/keeperd.mjs',
             'dist/index.html',
             'tools/local-erd/server.mjs',
+            'tools/local-erd/stop.mjs',
+            'tools/local-erd/stop-control.mjs',
+            'tools/local-erd/open-browser.mjs',
             'tools/local-erd/schema-diff.js',
             'tools/local-erd/introspect.sql',
             'tools/local-erd/index.html',
@@ -160,6 +166,19 @@ test('creates byte-identical archives without host metadata', () => {
         assert.doesNotMatch(entries, /PaxHeader/);
     } finally {
         rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test('refuses to package a release without the stop runtime', () => {
+    const root = fixture();
+    try {
+        rmSync(path.join(root, 'tools/local-erd/stop-control.mjs'));
+        assert.throws(
+            () => createReleaseBundle({ root }),
+            /Release bundle input is missing: tools\/local-erd\/stop-control\.mjs/
+        );
+    } finally {
+        rmSync(root, { force: true, recursive: true });
     }
 });
 

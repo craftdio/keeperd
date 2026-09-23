@@ -66,6 +66,38 @@ it('requires terminal login before loading repositories and recovers on retry', 
     });
 });
 
+it('refreshes the selected remote repository branches with account and repositories', async () => {
+    const events = [];
+    const listener = (event) => events.push(event.detail);
+    window.addEventListener('local-erd-repository', listener);
+    const fetch = vi.fn(async (path) =>
+        path.startsWith('/api/account')
+            ? response({
+                  login: 'example',
+                  name: 'Example',
+                  url,
+                  avatarUrl: '',
+              })
+            : path.startsWith('/api/repositories')
+              ? response({
+                    primaryUrl: url,
+                    repositories: [{ name: 'example/backend', url }],
+                })
+              : response({ snapshots: [] })
+    );
+    vi.stubGlobal('fetch', fetch);
+    await import('./home.js');
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    element('retry').click();
+    await vi.waitFor(() => expect(events).toHaveLength(2));
+    expect(events[1]).toMatchObject({
+        repositoryUrl: url,
+        refreshBranches: true,
+    });
+    expect(element('retry').textContent).toBe('계정·레포·선택 브랜치 새로고침');
+    window.removeEventListener('local-erd-repository', listener);
+});
+
 it('does not mistake connection or permission failures for missing login', async () => {
     vi.stubGlobal(
         'fetch',

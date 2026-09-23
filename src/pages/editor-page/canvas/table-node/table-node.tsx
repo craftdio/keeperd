@@ -4,6 +4,7 @@ import React, {
     useMemo,
     useRef,
     useEffect,
+    useContext,
 } from 'react';
 import type { NodeProps, Node } from '@xyflow/react';
 import {
@@ -34,16 +35,22 @@ import {
     TABLE_MINIMIZED_FIELDS,
     type DBTable,
 } from '@/lib/domain/db-table';
-import { TableNodeField } from './table-node-field';
+import {
+    LEFT_HANDLE_ID_PREFIX,
+    RIGHT_HANDLE_ID_PREFIX,
+    TARGET_ID_PREFIX,
+    TableNodeField,
+} from './table-node-field';
 import { useLayout } from '@/hooks/use-layout';
 import { useChartDB } from '@/hooks/use-chartdb';
-import type { RelationshipEdgeType } from '../relationship-edge/relationship-edge';
+import type { ChartDBContext } from '@/context/chartdb-context/chartdb-context';
+import type { DBRelationship } from '@/lib/domain/db-relationship';
 import type { DBField } from '@/lib/domain/db-field';
 import { useTranslation } from 'react-i18next';
 import { TableNodeContextMenu } from './table-node-context-menu';
 import { cn } from '@/lib/utils';
 import { TableNodeDependencyIndicator } from './table-node-dependency-indicator';
-import type { EdgeType } from '../canvas';
+import { getHighlightedFieldIds, sameFieldIds } from './highlighted-fields';
 import {
     Tooltip,
     TooltipContent,
@@ -53,6 +60,13 @@ import { useDiff } from '@/context/diff-context/use-diff';
 import { TableNodeStatus } from './table-node-status/table-node-status';
 import { TableEditMode } from './table-edit-mode/table-edit-mode';
 import { useCanvas } from '@/hooks/use-canvas';
+import type { CanvasContext } from '@/context/canvas-context/canvas-context';
+import { countInteractionRender } from '../interaction-benchmark';
+import { TableLODContext } from './table-lod-context';
+import {
+    getOverviewHandleAnchors,
+    getOverviewTableHeight,
+} from './table-overview-handles';
 
 export const TABLE_RELATIONSHIP_SOURCE_HANDLE_ID_PREFIX = 'table_rel_source_';
 export const TABLE_RELATIONSHIP_TARGET_HANDLE_ID_PREFIX = 'table_rel_target_';
@@ -71,8 +85,29 @@ export type TableNodeType = Node<
     'table'
 >;
 
-export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
+interface TableNodeContentProps extends NodeProps<TableNodeType> {
+    updateTable: ChartDBContext['updateTable'];
+    relationships: DBRelationship[];
+    readonly: boolean;
+    editTableMode: boolean;
+    editTableModeFieldId: string | null;
+    setEditTableModeTable: CanvasContext['setEditTableModeTable'];
+    setHoveringTableId: CanvasContext['setHoveringTableId'];
+    showCreateRelationshipNode: CanvasContext['showCreateRelationshipNode'];
+    tempFloatingEdge: CanvasContext['tempFloatingEdge'];
+}
+
+const TableNodeContent: React.FC<TableNodeContentProps> = React.memo(
     ({
+        updateTable,
+        relationships,
+        readonly,
+        editTableMode,
+        editTableModeFieldId,
+        setEditTableModeTable,
+        setHoveringTableId,
+        showCreateRelationshipNode,
+        tempFloatingEdge,
         selected,
         dragging,
         id,
@@ -86,8 +121,16 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
             targetEdgeCounts,
         },
     }) => {
-        const { updateTable, relationships, readonly } = useChartDB();
-        const edges = useStore((store) => store.edges) as EdgeType[];
+        useEffect(() => countInteractionRender('table'));
+        const highlightedFieldIds = useStore(
+            (store) =>
+                getHighlightedFieldIds(
+                    id,
+                    store.connectionLookup,
+                    store.edgeLookup
+                ),
+            sameFieldIds
+        );
         const {
             openTableFromSidebar,
             selectSidebarSection,
@@ -96,29 +139,13 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
         const [expanded, setExpanded] = useState(table.expanded ?? false);
         const { t } = useTranslation();
         const [isHovering, setIsHovering] = useState(false);
-        const {
-            setEditTableModeTable,
-            editTableModeTable,
-            setHoveringTableId,
-            showCreateRelationshipNode,
-            tempFloatingEdge,
-        } = useCanvas();
-
-        // Get edit mode state directly from context
-        const editTableMode = useMemo(
-            () => editTableModeTable?.tableId === table.id,
-            [editTableModeTable, table.id]
-        );
-        const editTableModeFieldId = useMemo(
-            () => (editTableMode ? editTableModeTable?.fieldId : null),
-            [editTableMode, editTableModeTable]
-        );
-
         // Store the initial field count when entering edit mode to keep table height fixed
         const [editModeInitialFieldCount, setEditModeInitialFieldCount] =
             useState<number | null>(null);
 
         const connection = useConnection();
+        const tableLOD = useContext(TableLODContext);
+        const isOverview = tableLOD !== 'detail';
 
         const isTarget = useMemo(() => {
             if (!isHovering) return false;
@@ -207,37 +234,6 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
 
         const { isDiffTableChanged, isDiffNewTable, isDiffTableRemoved } =
             diffState;
-
-        const selectedRelEdges: RelationshipEdgeType[] = useMemo(() => {
-            if (edges.length === 0) return [];
-
-            const relEdges: RelationshipEdgeType[] = [];
-            for (const edge of edges) {
-                if (
-                    edge.type === 'relationship-edge' &&
-                    (edge.source === id || edge.target === id) &&
-                    (edge.selected || edge.data?.highlighted)
-                ) {
-                    relEdges.push(edge as RelationshipEdgeType);
-                }
-            }
-            return relEdges;
-        }, [edges, id]);
-
-        const highlightedFieldIds = useMemo(() => {
-            const fieldIds = new Set<string>();
-            selectedRelEdges.forEach((edge) => {
-                if (edge.data?.relationship.sourceFieldId) {
-                    fieldIds.add(edge.data.relationship.sourceFieldId);
-                }
-
-                if (edge.data?.relationship.targetFieldId) {
-                    fieldIds.add(edge.data.relationship.targetFieldId);
-                }
-            });
-
-            return fieldIds;
-        }, [selectedRelEdges]);
 
         const focused = useMemo(
             () => (!!selected && !dragging) || isHovering,
@@ -334,6 +330,17 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
             editTableMode,
             editModeInitialFieldCount,
         ]);
+
+        const relationshipAnchors = useMemo(
+            () =>
+                getOverviewHandleAnchors(
+                    table.id,
+                    visibleFields,
+                    relationships,
+                    !isOverview
+                ),
+            [isOverview, table.id, visibleFields, relationships]
+        );
 
         const isPartOfCreatingRelationship = useMemo(
             () =>
@@ -432,6 +439,16 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
                 <div
                     data-table-id={table.id}
                     className={cn(tableClassName, 'relative')}
+                    style={
+                        isOverview
+                            ? {
+                                  height: getOverviewTableHeight(
+                                      visibleFields.length,
+                                      fields.length > TABLE_MINIMIZED_FIELDS
+                                  ),
+                              }
+                            : undefined
+                    }
                     onClick={(e) => {
                         if (e.detail === 2 && !readonly) {
                             e.stopPropagation();
@@ -493,6 +510,27 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
                         table={table}
                         focused={focused}
                     />
+                    {relationshipAnchors.map((anchor) => (
+                        <Handle
+                            key={`${anchor.side}_${anchor.index ?? ''}_${anchor.fieldId}`}
+                            id={
+                                anchor.side === 'target'
+                                    ? `${TARGET_ID_PREFIX}${anchor.index}_${anchor.fieldId}`
+                                    : `${anchor.side === 'left' ? LEFT_HANDLE_ID_PREFIX : RIGHT_HANDLE_ID_PREFIX}${anchor.fieldId}`
+                            }
+                            type={
+                                anchor.side === 'target' ? 'target' : 'source'
+                            }
+                            position={
+                                anchor.side === 'right'
+                                    ? Position.Right
+                                    : Position.Left
+                            }
+                            className="!invisible !absolute !h-4 !w-4"
+                            style={{ top: anchor.top }}
+                            isConnectable={false}
+                        />
+                    ))}
                     <TableNodeStatus
                         status={
                             isDiffNewTable
@@ -504,149 +542,160 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
                                     : 'none'
                         }
                     />
-                    <div
-                        className="table-node-detail h-2 rounded-t-[6px]"
-                        style={{ backgroundColor: tableColor }}
-                    ></div>
-                    <div className="table-node-detail group flex h-9 items-center justify-between bg-slate-200 px-2 dark:bg-slate-900">
-                        <div className="flex min-w-0 flex-1 items-center gap-2">
-                            {isDiffNewTable ? (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <SquarePlus
-                                            className="size-3.5 shrink-0 text-green-600"
-                                            strokeWidth={2.5}
-                                        />
-                                    </TooltipTrigger>
-                                    <TooltipContent>New Table</TooltipContent>
-                                </Tooltip>
-                            ) : isDiffTableRemoved ? (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <SquareMinus
-                                            className="size-3.5 shrink-0 text-red-600"
-                                            strokeWidth={2.5}
-                                        />
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        Table Removed
-                                    </TooltipContent>
-                                </Tooltip>
-                            ) : isDiffTableChanged && !isSummaryOnly ? (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <SquareDot
-                                            className="size-3.5 shrink-0 text-sky-600"
-                                            strokeWidth={2.5}
-                                        />
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        Table Changed
-                                    </TooltipContent>
-                                </Tooltip>
-                            ) : table.isView ? (
-                                <View className="size-3.5 shrink-0 text-gray-600 dark:text-primary" />
-                            ) : (
-                                <Table2 className="size-3.5 shrink-0 text-gray-600 dark:text-primary" />
-                            )}
+                    {!isOverview && (
+                        <>
+                            <div
+                                className="table-node-detail h-2 rounded-t-[6px]"
+                                style={{ backgroundColor: tableColor }}
+                            ></div>
+                            <div className="table-node-detail group flex h-9 items-center justify-between bg-slate-200 px-2 dark:bg-slate-900">
+                                <div className="flex min-w-0 flex-1 items-center gap-2">
+                                    {isDiffNewTable ? (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <SquarePlus
+                                                    className="size-3.5 shrink-0 text-green-600"
+                                                    strokeWidth={2.5}
+                                                />
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                New Table
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    ) : isDiffTableRemoved ? (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <SquareMinus
+                                                    className="size-3.5 shrink-0 text-red-600"
+                                                    strokeWidth={2.5}
+                                                />
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                Table Removed
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    ) : isDiffTableChanged && !isSummaryOnly ? (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <SquareDot
+                                                    className="size-3.5 shrink-0 text-sky-600"
+                                                    strokeWidth={2.5}
+                                                />
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                Table Changed
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    ) : table.isView ? (
+                                        <View className="size-3.5 shrink-0 text-gray-600 dark:text-primary" />
+                                    ) : (
+                                        <Table2 className="size-3.5 shrink-0 text-gray-600 dark:text-primary" />
+                                    )}
 
-                            {tableChangedName ? (
-                                <Label className="flex h-5 items-center justify-center truncate rounded-sm bg-sky-200 px-2 py-0.5 text-sm font-normal text-sky-900 dark:bg-sky-800 dark:text-sky-200">
-                                    <span className="truncate">
-                                        {tableChangedName.old}
-                                    </span>
-                                    <span className="mx-1 font-semibold">
-                                        →
-                                    </span>
-                                    <span className="truncate">
-                                        {tableChangedName.new}
-                                    </span>
-                                </Label>
-                            ) : isDiffNewTable ? (
-                                <Label className="flex h-5 flex-col justify-center truncate rounded-sm bg-green-200 px-2 py-0.5 text-sm font-normal text-green-900 dark:bg-green-800 dark:text-green-200">
-                                    {table.name}
-                                </Label>
-                            ) : isDiffTableRemoved ? (
-                                <Label className="flex h-5 flex-col justify-center truncate rounded-sm bg-red-200 px-2 py-0.5 text-sm font-normal text-red-900 dark:bg-red-800 dark:text-red-200">
-                                    {table.name}
-                                </Label>
-                            ) : isDiffTableChanged && !isSummaryOnly ? (
-                                <Label className="flex h-5 flex-col justify-center truncate rounded-sm bg-sky-200 px-2 py-0.5 text-sm font-normal text-sky-900 dark:bg-sky-800 dark:text-sky-200">
-                                    {table.name}
-                                </Label>
-                            ) : (
-                                <Label className="truncate px-2 py-0.5 text-sm font-bold">
-                                    {table.name}
-                                </Label>
-                            )}
-                        </div>
-                        <div className="hidden shrink-0 flex-row group-hover:flex">
-                            {readonly ? null : (
-                                <Button
-                                    variant="ghost"
-                                    className="size-6 p-0 text-slate-500 hover:bg-primary-foreground hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                                    onClick={openTableInEditor}
-                                >
-                                    <CircleDotDashed className="size-4" />
-                                </Button>
-                            )}
-                            <Button
-                                variant="ghost"
-                                className="size-6 p-0 text-slate-500 hover:bg-primary-foreground hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                                onClick={
-                                    table.width !== MAX_TABLE_SIZE
-                                        ? expandTable
-                                        : shrinkTable
-                                }
+                                    {tableChangedName ? (
+                                        <Label className="flex h-5 items-center justify-center truncate rounded-sm bg-sky-200 px-2 py-0.5 text-sm font-normal text-sky-900 dark:bg-sky-800 dark:text-sky-200">
+                                            <span className="truncate">
+                                                {tableChangedName.old}
+                                            </span>
+                                            <span className="mx-1 font-semibold">
+                                                →
+                                            </span>
+                                            <span className="truncate">
+                                                {tableChangedName.new}
+                                            </span>
+                                        </Label>
+                                    ) : isDiffNewTable ? (
+                                        <Label className="flex h-5 flex-col justify-center truncate rounded-sm bg-green-200 px-2 py-0.5 text-sm font-normal text-green-900 dark:bg-green-800 dark:text-green-200">
+                                            {table.name}
+                                        </Label>
+                                    ) : isDiffTableRemoved ? (
+                                        <Label className="flex h-5 flex-col justify-center truncate rounded-sm bg-red-200 px-2 py-0.5 text-sm font-normal text-red-900 dark:bg-red-800 dark:text-red-200">
+                                            {table.name}
+                                        </Label>
+                                    ) : isDiffTableChanged && !isSummaryOnly ? (
+                                        <Label className="flex h-5 flex-col justify-center truncate rounded-sm bg-sky-200 px-2 py-0.5 text-sm font-normal text-sky-900 dark:bg-sky-800 dark:text-sky-200">
+                                            {table.name}
+                                        </Label>
+                                    ) : (
+                                        <Label className="truncate px-2 py-0.5 text-sm font-bold">
+                                            {table.name}
+                                        </Label>
+                                    )}
+                                </div>
+                                <div className="hidden shrink-0 flex-row group-hover:flex">
+                                    {readonly ? null : (
+                                        <Button
+                                            variant="ghost"
+                                            className="size-6 p-0 text-slate-500 hover:bg-primary-foreground hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                                            onClick={openTableInEditor}
+                                        >
+                                            <CircleDotDashed className="size-4" />
+                                        </Button>
+                                    )}
+                                    <Button
+                                        variant="ghost"
+                                        className="size-6 p-0 text-slate-500 hover:bg-primary-foreground hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                                        onClick={
+                                            table.width !== MAX_TABLE_SIZE
+                                                ? expandTable
+                                                : shrinkTable
+                                        }
+                                    >
+                                        {table.width !== MAX_TABLE_SIZE ? (
+                                            <ChevronsLeftRight className="size-4" />
+                                        ) : (
+                                            <ChevronsRightLeft className="size-4" />
+                                        )}
+                                    </Button>
+                                </div>
+                            </div>
+                            <div
+                                className="table-node-detail transition-[max-height] duration-200 ease-in-out"
+                                style={{
+                                    maxHeight: expanded
+                                        ? `${(editTableMode && editModeInitialFieldCount !== null ? editModeInitialFieldCount : fields.length) * 2}rem` // h-8 per field
+                                        : `${TABLE_MINIMIZED_FIELDS * 2}rem`, // h-8 per field
+                                }}
                             >
-                                {table.width !== MAX_TABLE_SIZE ? (
-                                    <ChevronsLeftRight className="size-4" />
-                                ) : (
-                                    <ChevronsRightLeft className="size-4" />
-                                )}
-                            </Button>
-                        </div>
-                    </div>
-                    <div
-                        className="table-node-detail transition-[max-height] duration-200 ease-in-out"
-                        style={{
-                            maxHeight: expanded
-                                ? `${(editTableMode && editModeInitialFieldCount !== null ? editModeInitialFieldCount : fields.length) * 2}rem` // h-8 per field
-                                : `${TABLE_MINIMIZED_FIELDS * 2}rem`, // h-8 per field
-                        }}
-                    >
-                        {visibleFields.map((field: DBField) => (
-                            <TableNodeField
-                                key={field.id}
-                                focused={focused}
-                                tableNodeId={id}
-                                field={field}
-                                highlighted={highlightedFieldIds.has(field.id)}
-                                visible={true}
-                                isConnectable={!table.isView}
-                                targetEdgeCount={targetEdgeCounts?.[field.id]}
-                            />
-                        ))}
-                    </div>
-                    {(editTableMode && editModeInitialFieldCount !== null
-                        ? editModeInitialFieldCount
-                        : fields.length) > TABLE_MINIMIZED_FIELDS && (
-                        <div
-                            className="table-node-detail z-10 flex h-8 cursor-pointer items-center justify-center rounded-b-md border-t text-xs text-muted-foreground transition-colors duration-200 hover:bg-slate-100 dark:hover:bg-slate-800"
-                            onClick={toggleExpand}
-                        >
-                            {expanded ? (
-                                <>
-                                    <ChevronUp className="mr-1 size-3.5" />
-                                    {t('show_less')}
-                                </>
-                            ) : (
-                                <>
-                                    <ChevronDown className="mr-1 size-3.5" />
-                                    {t('show_more')}
-                                </>
+                                {visibleFields.map((field: DBField) => (
+                                    <TableNodeField
+                                        key={field.id}
+                                        focused={focused}
+                                        tableNodeId={id}
+                                        field={field}
+                                        highlighted={highlightedFieldIds.has(
+                                            field.id
+                                        )}
+                                        visible={true}
+                                        isConnectable={!table.isView}
+                                        targetEdgeCount={
+                                            targetEdgeCounts?.[field.id]
+                                        }
+                                    />
+                                ))}
+                            </div>
+                            {(editTableMode &&
+                            editModeInitialFieldCount !== null
+                                ? editModeInitialFieldCount
+                                : fields.length) > TABLE_MINIMIZED_FIELDS && (
+                                <div
+                                    className="table-node-detail z-10 flex h-8 cursor-pointer items-center justify-center rounded-b-md border-t text-xs text-muted-foreground transition-colors duration-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                    onClick={toggleExpand}
+                                >
+                                    {expanded ? (
+                                        <>
+                                            <ChevronUp className="mr-1 size-3.5" />
+                                            {t('show_less')}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <ChevronDown className="mr-1 size-3.5" />
+                                            {t('show_more')}
+                                        </>
+                                    )}
+                                </div>
                             )}
-                        </div>
+                        </>
                     )}
                     <div
                         aria-hidden="true"
@@ -671,6 +720,51 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
                     </div>
                 </div>
             </TableNodeContextMenu>
+        );
+    }
+);
+
+TableNodeContent.displayName = 'TableNodeContent';
+
+export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
+    (props) => {
+        // ChartDB's context updates after any table save. Keep that inexpensive
+        // subscription outside the memoized node content so an unchanged table
+        // does not recalculate its fields and relationship presentation.
+        const { updateTable, relationships, readonly } = useChartDB();
+        const {
+            editTableModeTable,
+            setEditTableModeTable,
+            setHoveringTableId,
+            showCreateRelationshipNode,
+            tempFloatingEdge,
+        } = useCanvas();
+        const updateTableRef = useRef(updateTable);
+        useEffect(() => {
+            updateTableRef.current = updateTable;
+        }, [updateTable]);
+        const stableUpdateTable = useCallback<ChartDBContext['updateTable']>(
+            (...args) => updateTableRef.current(...args),
+            []
+        );
+
+        return (
+            <TableNodeContent
+                {...props}
+                updateTable={stableUpdateTable}
+                relationships={relationships}
+                readonly={!!readonly}
+                editTableMode={editTableModeTable?.tableId === props.id}
+                editTableModeFieldId={
+                    editTableModeTable?.tableId === props.id
+                        ? (editTableModeTable.fieldId ?? null)
+                        : null
+                }
+                setEditTableModeTable={setEditTableModeTable}
+                setHoveringTableId={setHoveringTableId}
+                showCreateRelationshipNode={showCreateRelationshipNode}
+                tempFloatingEdge={tempFloatingEdge}
+            />
         );
     }
 );

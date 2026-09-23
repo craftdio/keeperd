@@ -53,7 +53,9 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
     const panel = document.createElement('div');
     panel.id = 'erd-repository-panel';
     panel.hidden = true;
-    panel.innerHTML = `<section role="dialog" aria-modal="true" aria-labelledby="erd-repository-title"><header><div><h2 id="erd-repository-title">ERD 이동</h2><p>원격 또는 로컬 Git을 선택하고 원하는 브랜치로 Sync합니다.</p></div><button class="switcher-close" type="button" aria-label="닫기">×</button></header><label for="switcher-source">ERD 입력 출처</label><select id="switcher-source"><option value="remote">GitHub 원격</option><option value="local">로컬 Git</option></select><div id="switcher-remote-fields"><label id="switcher-owner-label" for="switcher-owner">GitHub 조직 / 계정</label><select id="switcher-owner"></select><label id="switcher-repository-label" for="switcher-repository">GitHub 레포</label><input id="switcher-search" type="search" placeholder="레포 이름으로 검색" autocomplete="off"><select id="switcher-repository"></select></div><div id="switcher-local-fields" hidden><label id="switcher-local-repository-label" for="switcher-local-repository">로컬 레포</label><select id="switcher-local-repository"></select><label id="switcher-local-worktree-label" for="switcher-local-worktree">사용할 로컬 복제본</label><select id="switcher-local-worktree"></select></div><label for="switcher-branch">브랜치</label><select id="switcher-branch"></select><small class="switcher-status" role="status"></small><footer><button class="switcher-cancel" type="button">취소</button><button class="switcher-submit" type="button">Sync하고 ERD 열기</button></footer></section>`;
+    panel.innerHTML = `<section role="dialog" aria-modal="true" aria-labelledby="erd-repository-title"><header><div><h2 id="erd-repository-title">ERD 이동</h2><p>원격 또는 로컬 Git을 선택하고 원하는 브랜치로 Sync합니다.</p></div><button class="switcher-close" type="button" aria-label="닫기">×</button></header><label for="switcher-source">ERD 입력 출처</label><select id="switcher-source"><option value="remote">GitHub 원격</option><option value="local">로컬 Git</option></select><div id="switcher-remote-fields"><label id="switcher-owner-label" for="switcher-owner">GitHub 조직 / 계정</label><select id="switcher-owner"></select><label id="switcher-repository-label" for="switcher-repository">GitHub 레포</label><input id="switcher-search" type="search" placeholder="레포 이름으로 검색" autocomplete="off"><select id="switcher-repository"></select></div><div id="switcher-local-fields" hidden><label id="switcher-local-repository-label" for="switcher-local-repository">로컬 레포</label><select id="switcher-local-repository"></select><label id="switcher-local-worktree-label" for="switcher-local-worktree">사용할 로컬 복제본</label><select id="switcher-local-worktree"></select></div><div class="switcher-branch-heading"><label for="switcher-branch">브랜치</label><button id="switcher-branch-refresh" type="button" aria-label="브랜치 목록 새로고침" title="선택한 저장소의 브랜치 목록 새로고침">↻ 새로고침</button></div><select id="switcher-branch"></select><small class="switcher-status" role="status" aria-live="polite"></small><footer><button class="switcher-cancel" type="button">취소</button><button class="switcher-submit" type="button">Sync하고 ERD 열기</button></footer></section>`;
+    style.textContent +=
+        '#erd-repository-panel .switcher-branch-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px}#erd-repository-panel .switcher-branch-heading label{margin:0}#erd-repository-panel #switcher-branch-refresh{padding:5px 9px;border:1px solid #475569;border-radius:7px;background:#172131;color:#e2e8f0;font:12px system-ui;cursor:pointer}#erd-repository-panel #switcher-branch-refresh:disabled{opacity:.55;cursor:wait}';
     document.body.append(panel);
 
     const section = panel.querySelector('section');
@@ -63,6 +65,7 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
     const owner = panel.querySelector('#switcher-owner');
     const repository = panel.querySelector('#switcher-repository');
     const branch = panel.querySelector('#switcher-branch');
+    const refresh = panel.querySelector('#switcher-branch-refresh');
     const search = panel.querySelector('#switcher-search');
     const localRepository = panel.querySelector('#switcher-local-repository');
     const localWorktree = panel.querySelector('#switcher-local-worktree');
@@ -79,6 +82,7 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
     let selectedLocalId = '';
     let currentLocalBranch = '';
     let request = 0;
+    let sourceRequest = 0;
 
     const ownerPicker = createPicker(owner, 'switcher-owner-label', (value) => {
         const item = owners.find((candidate) => candidate.login === value);
@@ -140,6 +144,8 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
             busy || !local || !localRepositoryOptions.length;
         localWorktree.disabled = busy || !local || !localRepositories.length;
         submit.disabled = busy || !branch.value;
+        refresh.disabled =
+            busy || !(local ? selectedLocalId : selectedRepository);
         ownerPicker.refresh();
         repositoryPicker.refresh();
         localRepositoryPicker.refresh();
@@ -234,11 +240,14 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
         localWorktreePicker.refresh();
     }
 
-    async function loadBranches(preferredBranch) {
+    async function loadBranches(preferredBranch, force = false) {
         const currentRequest = ++request;
         const local = source.value === 'local';
-        branch.replaceChildren();
-        currentLocalBranch = '';
+        const previous = force
+            ? (preferredBranch ?? branch.value)
+            : preferredBranch;
+        if (!force) branch.replaceChildren();
+        if (!force) currentLocalBranch = '';
         status.textContent = local
             ? selectedLocalId
                 ? '로컬 브랜치를 불러오는 중…'
@@ -246,7 +255,10 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
             : selectedRepository
               ? 'GitHub 브랜치를 불러오는 중…'
               : '레포를 선택하세요.';
-        setBusy(true);
+        setBusy(false);
+        branch.disabled = true;
+        submit.disabled = true;
+        refresh.disabled = true;
         const target = local ? selectedLocalId : selectedRepository;
         if (!target) {
             setBusy(false);
@@ -255,8 +267,8 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
         try {
             const payload = await json(
                 local
-                    ? `/api/local/branches?local=${encodeURIComponent(selectedLocalId)}`
-                    : `/api/branches?repository=${encodeURIComponent(selectedRepository)}`
+                    ? `/api/local/branches?local=${encodeURIComponent(target)}`
+                    : `/api/branches?repository=${encodeURIComponent(target)}${force ? '&refresh=1' : ''}`
             );
             if (currentRequest !== request) return;
             currentLocalBranch = local ? (payload.current ?? '') : '';
@@ -282,8 +294,8 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
                     return option;
                 })
             );
-            branch.value = names.includes(preferredBranch)
-                ? preferredBranch
+            branch.value = names.includes(previous)
+                ? previous
                 : names.includes(currentLocalBranch)
                   ? currentLocalBranch
                   : names.includes('develop')
@@ -291,9 +303,11 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
                     : names.includes('main')
                       ? 'main'
                       : (names[0] ?? '');
-            status.textContent = branch.value
-                ? ''
-                : '이 저장소에 브랜치가 없습니다.';
+            status.textContent = !branch.value
+                ? '이 저장소에 브랜치가 없습니다.'
+                : previous && !names.includes(previous)
+                  ? `이전 브랜치 ${previous}를 찾을 수 없어 ${branch.value} 브랜치를 선택했습니다.`
+                  : '';
         } catch (error) {
             if (currentRequest !== request) return;
             status.textContent = error.message;
@@ -302,9 +316,10 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
         }
     }
 
-    async function loadRemote(current) {
+    async function loadRemote(current, generation) {
         status.textContent = 'GitHub 조직과 레포를 불러오는 중…';
         const payload = await json('/api/repositories');
+        if (generation !== sourceRequest) return;
         repositories = payload.repositories.map((item) => ({
             ...item,
             url: item.url.toLowerCase(),
@@ -359,9 +374,10 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
         );
     }
 
-    async function loadLocal(current) {
+    async function loadLocal(current, generation) {
         status.textContent = '등록된 로컬 저장소를 불러오는 중…';
         const payload = await json('/api/local/repositories');
+        if (generation !== sourceRequest) return;
         localRepositories = payload.repositories;
         if (!localRepositories.length)
             throw new Error(
@@ -386,15 +402,18 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
     }
 
     async function loadSource(current = getCurrent()) {
+        const generation = ++sourceRequest;
+        ++request;
         const local = source.value === 'local';
         remoteFields.hidden = local;
         localFields.hidden = !local;
         branch.replaceChildren();
         setBusy(true);
         try {
-            if (local) await loadLocal(current);
-            else await loadRemote(current);
+            if (local) await loadLocal(current, generation);
+            else await loadRemote(current, generation);
         } catch (error) {
+            if (generation !== sourceRequest) return;
             status.textContent = error.message;
             setBusy(false);
         }
@@ -411,6 +430,8 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
     }
 
     function close() {
+        ++sourceRequest;
+        ++request;
         panel.hidden = true;
     }
 
@@ -446,6 +467,10 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
         loadBranches();
     };
     branch.onchange = () => setBusy(false);
+    refresh.onclick = () => {
+        if (refresh.disabled) return;
+        loadBranches(branch.value, true);
+    };
     panel.querySelector('.switcher-close').onclick = close;
     panel.querySelector('.switcher-cancel').onclick = close;
     panel.onmousedown = (event) => {
@@ -488,5 +513,14 @@ export function createRepositorySwitcher({ getCurrent, onChoose }) {
     };
 
     window.addEventListener('local-erd-switcher', open);
-    return { open, close };
+    return {
+        open,
+        close,
+        destroy() {
+            close();
+            window.removeEventListener('local-erd-switcher', open);
+            panel.remove();
+            style.remove();
+        },
+    };
 }

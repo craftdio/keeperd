@@ -16,7 +16,8 @@ export function createMemoryCache({ ttl = Infinity, now = Date.now } = {}) {
         entries.set(key, { pending });
         try {
             const value = await pending;
-            entries.set(key, { value, expiresAt: now() + ttl });
+            if (entries.get(key)?.pending === pending)
+                entries.set(key, { value, expiresAt: now() + ttl });
             return { value, cached: false };
         } catch (error) {
             if (entries.get(key)?.pending === pending) entries.delete(key);

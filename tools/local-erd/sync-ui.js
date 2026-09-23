@@ -27,12 +27,40 @@ style.textContent +=
 const toolbar = document.createElement('div');
 toolbar.id = 'erd-sync';
 const home = location.pathname === '/';
-toolbar.innerHTML = `${home ? '' : '<select id="erd-sync-source" aria-label="Sync 기준"><option value="remote">GitHub 원격</option><option value="local">로컬 Git</option></select>'}<select id="erd-branch" aria-label="열거나 동기화할 GitHub 브랜치" disabled><option>브랜치 불러오는 중…</option></select><button id="erd-sync-action" type="button" title="GitHub 최신 스키마로 갱신" aria-label="GitHub 최신 상태로 Sync" disabled>${icon}<span>GitHub 최신 상태로 Sync</span></button>${home ? `<button id="erd-open" type="button" disabled><span>이 브랜치로 ERD 열기</span>${arrow}</button>` : '<button id="erd-layout-action" type="button" disabled>작업 데이터 공유</button>'}<div id="erd-info"><button id="erd-info-button" type="button" aria-label="현재 Sync 정보" aria-describedby="erd-info-tooltip" aria-expanded="false">${infoIcon}</button><div id="erd-info-tooltip" role="tooltip"><strong>${home ? '현재 선택 정보' : '현재 ERD 정보'}</strong><small id="erd-worktree-status" role="status" hidden></small><small id="erd-branch-status" role="status"></small><small id="erd-schema-status" role="status"></small><small id="erd-input-status" role="status"></small></div></div>`;
+toolbar.innerHTML = `${home ? '' : '<select id="erd-sync-source" aria-label="Sync 기준"><option value="remote">GitHub 원격</option><option value="local">로컬 Git</option></select>'}<select id="erd-branch" aria-label="열거나 동기화할 GitHub 브랜치" disabled><option>브랜치 불러오는 중…</option></select><button id="erd-branch-refresh" type="button" aria-label="브랜치 목록 새로고침" title="선택한 저장소의 브랜치 목록 새로고침" disabled>${icon}</button><button id="erd-sync-action" type="button" title="GitHub 최신 스키마로 갱신" aria-label="GitHub 최신 상태로 Sync" disabled>${icon}<span>GitHub 최신 상태로 Sync</span></button>${home ? `<button id="erd-open" type="button" disabled><span>이 브랜치로 ERD 열기</span>${arrow}</button>` : '<button id="erd-layout-action" type="button" disabled>작업 데이터 공유</button>'}<div id="erd-info"><button id="erd-info-button" type="button" aria-label="현재 Sync 정보" aria-describedby="erd-info-tooltip" aria-expanded="false">${infoIcon}</button><div id="erd-info-tooltip" role="tooltip"><strong>${home ? '현재 선택 정보' : '현재 ERD 정보'}</strong><small id="erd-worktree-status" role="status" hidden></small><small id="erd-branch-status" role="status"></small><small id="erd-schema-status" role="status"></small><small id="erd-input-status" role="status"></small></div></div>`;
 const panel = document.createElement('div');
 panel.id = 'erd-sync-panel';
 panel.innerHTML =
     '<section role="dialog" aria-modal="true" aria-labelledby="erd-sync-title"><h2 id="erd-sync-title">GitHub 스키마 동기화</h2><p role="status" aria-live="polite"></p><progress max="100" value="0" aria-label="동기화 진행률"></progress><p><small>선택한 브랜치만 갱신합니다.<br>브랜치별 배치·색상·메모를 유지합니다.</small></p><button type="button" hidden>닫기</button></section>';
 (document.querySelector('#sync-controls') ?? document.body).append(toolbar);
+if (!home) {
+    const root = document.querySelector('#root');
+    let observedHeader;
+    const resizeObserver =
+        typeof ResizeObserver === 'undefined'
+            ? null
+            : new ResizeObserver(() => positionBelowHeader());
+    function positionBelowHeader() {
+        const header = root?.querySelector('nav');
+        if (!header) return false;
+        if (header !== observedHeader) {
+            if (observedHeader) resizeObserver?.unobserve(observedHeader);
+            resizeObserver?.observe(header);
+            observedHeader = header;
+        }
+        toolbar.style.top = `${Math.ceil(header.getBoundingClientRect().bottom) + 10}px`;
+        return true;
+    }
+    positionBelowHeader();
+    if (root) {
+        const observer = new MutationObserver(() => {
+            if (root.querySelector('nav') !== observedHeader)
+                positionBelowHeader();
+        });
+        observer.observe(root, { childList: true, subtree: true });
+    }
+    window.addEventListener('resize', positionBelowHeader);
+}
 document.body.append(panel);
 const layoutPanel = document.createElement('div');
 layoutPanel.id = 'erd-layout-panel';
@@ -116,7 +144,7 @@ const syncButton = toolbar.querySelector('#erd-sync-action'),
 const select = toolbar.querySelector('#erd-branch');
 const sourceBasis = toolbar.querySelector('#erd-sync-source');
 const layoutButton = toolbar.querySelector('#erd-layout-action');
-const refresh = toolbar.querySelector('[aria-label="브랜치 목록 새로고침"]');
+const refresh = toolbar.querySelector('#erd-branch-refresh');
 const branchStatus = toolbar.querySelector('#erd-branch-status');
 const schemaStatus = toolbar.querySelector('#erd-schema-status');
 const inputStatus = toolbar.querySelector('#erd-input-status');
@@ -539,6 +567,7 @@ checkRemote.onclick = async () => {
     }
 };
 let loaded = false;
+let schemaBlocked = '';
 let repositoryUrl = '';
 let primaryUrl = '';
 let branchRequest = 0;
@@ -654,12 +683,14 @@ function refreshActions() {
     if (home && !localId)
         selectionSummary.textContent =
             '로컬 저장소를 선택하면 커밋·원격 반영 상태·스키마 비교 기준을 확인할 수 있습니다.';
-    syncButton.disabled = active || !loaded;
+    syncButton.disabled = active || !loaded || Boolean(schemaBlocked);
     const snapshot = loaded ? selectedSnapshot() : undefined;
-    inputStatus.hidden = !snapshot?.schemaSource;
-    inputStatus.textContent = snapshot?.schemaSource
-        ? `스키마 입력 · ${snapshot.schemaSource.label} · ${snapshot.schemaSource.path} · ${snapshot.schemaSource.files}개`
-        : '';
+    inputStatus.hidden = !snapshot?.schemaSource && !schemaBlocked;
+    inputStatus.textContent = schemaBlocked
+        ? schemaBlocked
+        : snapshot?.schemaSource
+          ? `스키마 입력 · ${snapshot.schemaSource.label} · ${snapshot.schemaSource.path} · ${snapshot.schemaSource.files}개`
+          : '';
     if (!openButton) return;
     openButton.disabled = active || !loaded;
     openButton.title = snapshot
@@ -670,11 +701,10 @@ async function loadBranches(preferredBranch, refreshFromGitHub = false) {
     if (!repositoryUrl) return false;
     let succeeded = false;
     const request = ++branchRequest;
-    if (refresh) refresh.disabled = true;
+    refresh.disabled = true;
     select.disabled = true;
     syncButton.disabled = true;
     if (openButton) openButton.disabled = true;
-    loaded = false;
     branchStatus.textContent = localId
         ? '로컬 브랜치 조회 중…'
         : 'GitHub 브랜치 조회 중…';
@@ -690,6 +720,7 @@ async function loadBranches(preferredBranch, refreshFromGitHub = false) {
         const snapshotPayload = await fetch('/data/snapshots.json', {
             cache: 'no-store',
         }).then((r) => (r.ok ? r.json() : { snapshots: [] }));
+        if (request !== branchRequest) return false;
         snapshots = snapshotPayload.snapshots;
         const current = snapshots.find(
             (s) =>
@@ -697,7 +728,6 @@ async function loadBranches(preferredBranch, refreshFromGitHub = false) {
                 canonicalRepository(s.repositoryUrl ?? primaryUrl) ===
                     canonicalRepository(repositoryUrl)
         )?.branch;
-        if (request !== branchRequest) return true;
         currentLocalBranch = payload.current ?? '';
         showAllLocal.hidden = !localId;
         checkRemote.hidden = !localId;
@@ -709,7 +739,7 @@ async function loadBranches(preferredBranch, refreshFromGitHub = false) {
             'aria-label',
             localId ? '로컬 스키마 Sync' : 'GitHub 스키마 Sync'
         );
-        const preferred = preferredBranch || current || select.value;
+        const preferred = preferredBranch || select.value || current;
         localBranchDetails = localId
             ? payload.branches.map((branch) =>
                   typeof branch === 'string'
@@ -755,7 +785,7 @@ async function loadBranches(preferredBranch, refreshFromGitHub = false) {
             error.message || '브랜치 조회 실패. 새로고침으로 다시 시도하세요.';
     } finally {
         if (request === branchRequest) {
-            if (refresh) refresh.disabled = active;
+            refresh.disabled = active || !repositoryUrl;
             select.disabled = active || !loaded;
             refreshActions();
             window.dispatchEvent(new CustomEvent('local-erd-branches-ready'));
@@ -763,8 +793,9 @@ async function loadBranches(preferredBranch, refreshFromGitHub = false) {
     }
     return succeeded;
 }
-if (refresh) refresh.onclick = () => loadBranches(undefined, true);
+refresh.onclick = () => loadBranches(undefined, true);
 select.onchange = () => {
+    schemaBlocked = '';
     inputNotice();
     refreshActions();
 };
@@ -821,6 +852,15 @@ async function track(job) {
         return;
     }
     if (job.status === 'error') {
+        if (
+            [
+                'SCHEMA_METHOD_UNSUPPORTED',
+                'SCHEMA_CONFIGURATION_MISSING',
+                'SCHEMA_CONFIGURATION_AMBIGUOUS',
+                'SCHEMA_VERSION_UNSUPPORTED',
+            ].includes(job.code)
+        )
+            schemaBlocked = job.message;
         fail(job.message);
         return;
     }
@@ -894,17 +934,26 @@ fetch('/api/sync', { cache: 'no-store' })
     .catch(() => {});
 window.addEventListener('local-erd-repository', (event) => {
     if (active) return;
+    schemaBlocked = '';
+    const sameSource =
+        repositoryUrl === event.detail.repositoryUrl &&
+        localId === (event.detail.localId ?? '');
+    const preferredBranch = sameSource ? select.value : undefined;
     repositoryUrl = event.detail.repositoryUrl;
     primaryUrl = event.detail.primaryUrl;
     localId = event.detail.localId ?? '';
     localBranchDetails = [];
     if (home) showWorktree(localId, '현재 선택 worktree');
     updateSyncAction();
-    select.replaceChildren();
-    loadBranches();
+    if (!sameSource) {
+        loaded = false;
+        select.replaceChildren();
+    }
+    loadBranches(preferredBranch, event.detail.refreshBranches === true);
 });
 window.addEventListener('local-erd-auth', () => {
     if (active) return;
+    schemaBlocked = '';
     ++branchRequest;
     repositoryUrl = '';
     localId = '';
@@ -1022,8 +1071,10 @@ if (
     };
 }
 if (!home) {
+    let sourceRequest = 0;
     async function switchSyncSource(source) {
         if (active) return;
+        const request = ++sourceRequest;
         const previousLocalId = localId;
         const preferredBranch = select.value || currentSnapshot?.branch;
         sourceBasis.disabled = true;
@@ -1042,6 +1093,7 @@ if (!home) {
                     cache: 'no-store',
                 });
                 const payload = await response.json();
+                if (request !== sourceRequest) return;
                 if (!response.ok) throw new Error(payload.error);
                 const candidates = payload.repositories.filter(
                     (repo) =>
@@ -1063,11 +1115,14 @@ if (!home) {
             }
             localBranchDetails = [];
             updateSyncAction();
-            if (!(await loadBranches(preferredBranch)))
+            const branchesLoaded = await loadBranches(preferredBranch);
+            if (request !== sourceRequest) return;
+            if (!branchesLoaded)
                 throw new Error(
                     branchStatus.textContent || '브랜치를 불러오지 못했습니다.'
                 );
         } catch (error) {
+            if (request !== sourceRequest) return;
             localId = previousLocalId;
             updateSyncAction();
             try {
@@ -1080,7 +1135,7 @@ if (!home) {
             branchStatus.textContent =
                 error.message || 'Sync 기준을 전환하지 못했습니다.';
         } finally {
-            sourceBasis.disabled = active;
+            if (request === sourceRequest) sourceBasis.disabled = active;
         }
     }
     sourceBasis.onchange = () => switchSyncSource(sourceBasis.value);

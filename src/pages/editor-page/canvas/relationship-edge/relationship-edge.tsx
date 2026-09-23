@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { Edge, EdgeProps } from '@xyflow/react';
 import { getSmoothStepPath, Position, useReactFlow } from '@xyflow/react';
@@ -12,6 +12,9 @@ import { useLocalConfig } from '@/hooks/use-local-config';
 import { useCanvas } from '@/hooks/use-canvas';
 import { EditRelationshipPopover } from './edit-relationship-popover';
 import { EllipsisIcon } from 'lucide-react';
+import { countInteractionRender } from '../interaction-benchmark';
+import type { ChartDBContext } from '@/context/chartdb-context/chartdb-context';
+import type { CanvasContext } from '@/context/canvas-context/canvas-context';
 
 export type RelationshipEdgeType = Edge<
     {
@@ -21,9 +24,24 @@ export type RelationshipEdgeType = Edge<
     'relationship-edge'
 >;
 
-export const RelationshipEdge: React.FC<EdgeProps<RelationshipEdgeType>> =
+interface RelationshipEdgeContentProps extends EdgeProps<RelationshipEdgeType> {
+    relationships: DBRelationship[];
+    updateRelationship: ChartDBContext['updateRelationship'];
+    removeRelationship: ChartDBContext['removeRelationship'];
+    openRelationshipPopover: CanvasContext['openRelationshipPopover'];
+    closeRelationshipPopover: CanvasContext['closeRelationshipPopover'];
+    popoverPosition: { x: number; y: number } | null;
+}
+
+const RelationshipEdgeContent: React.FC<RelationshipEdgeContentProps> =
     React.memo(
         ({
+            relationships,
+            updateRelationship,
+            removeRelationship,
+            openRelationshipPopover,
+            closeRelationshipPopover,
+            popoverPosition,
             id,
             sourceX,
             sourceY,
@@ -34,25 +52,14 @@ export const RelationshipEdge: React.FC<EdgeProps<RelationshipEdgeType>> =
             selected,
             data,
         }) => {
+            useEffect(() => countInteractionRender('edge'));
             const { getInternalNode, getEdge } = useReactFlow();
             const { checkIfRelationshipRemoved, checkIfNewRelationship } =
                 useDiff();
             const { showCardinality } = useLocalConfig();
 
-            const { relationships, updateRelationship, removeRelationship } =
-                useChartDB();
-            const {
-                editRelationshipPopover,
-                openRelationshipPopover,
-                closeRelationshipPopover,
-            } = useCanvas();
-
             const relationship = data?.relationship;
-
-            const isPopoverOpen = useMemo(
-                () => editRelationshipPopover?.relationshipId === id,
-                [editRelationshipPopover, id]
-            );
+            const isPopoverOpen = !!popoverPosition;
 
             const handleEdgeClick = useCallback(
                 (e: React.MouseEvent) => {
@@ -424,12 +431,10 @@ export const RelationshipEdge: React.FC<EdgeProps<RelationshipEdgeType>> =
                     )}
                     {relationship &&
                         isPopoverOpen &&
-                        editRelationshipPopover?.position &&
+                        popoverPosition &&
                         createPortal(
                             <EditRelationshipPopover
-                                anchorPosition={
-                                    editRelationshipPopover.position
-                                }
+                                anchorPosition={popoverPosition}
                                 relationshipId={id}
                                 sourceCardinality={
                                     relationship.sourceCardinality ?? 'one'
@@ -454,5 +459,34 @@ export const RelationshipEdge: React.FC<EdgeProps<RelationshipEdgeType>> =
             );
         }
     );
+
+RelationshipEdgeContent.displayName = 'RelationshipEdgeContent';
+
+export const RelationshipEdge: React.FC<EdgeProps<RelationshipEdgeType>> =
+    React.memo((props) => {
+        const { relationships, updateRelationship, removeRelationship } =
+            useChartDB();
+        const {
+            editRelationshipPopover,
+            openRelationshipPopover,
+            closeRelationshipPopover,
+        } = useCanvas();
+
+        return (
+            <RelationshipEdgeContent
+                {...props}
+                relationships={relationships}
+                updateRelationship={updateRelationship}
+                removeRelationship={removeRelationship}
+                openRelationshipPopover={openRelationshipPopover}
+                closeRelationshipPopover={closeRelationshipPopover}
+                popoverPosition={
+                    editRelationshipPopover?.relationshipId === props.id
+                        ? editRelationshipPopover.position
+                        : null
+                }
+            />
+        );
+    });
 
 RelationshipEdge.displayName = 'RelationshipEdge';

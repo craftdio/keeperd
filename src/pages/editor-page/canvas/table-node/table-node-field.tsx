@@ -1,16 +1,5 @@
-import React, {
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-} from 'react';
-import {
-    Handle,
-    Position,
-    useConnection,
-    useUpdateNodeInternals,
-} from '@xyflow/react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Handle, Position, useConnection } from '@xyflow/react';
 import { Button } from '@/components/button/button';
 import {
     KeyRound,
@@ -92,7 +81,6 @@ export const TableNodeField: React.FC<TableNodeFieldProps> = React.memo(
         const { relationships, readonly, highlightedCustomType, databaseType } =
             useChartDB();
 
-        const updateNodeInternals = useUpdateNodeInternals();
         const connection = useConnection();
         const isTarget = useMemo(
             () =>
@@ -169,24 +157,6 @@ export const TableNodeField: React.FC<TableNodeFieldProps> = React.memo(
                 );
             });
         }, [relationships, tableNodeId, field.id]);
-
-        const previousNumberOfEdgesToFieldRef = useRef<number | null>(null);
-
-        useEffect(() => {
-            // Always update on first render, then only when count changes
-            if (
-                previousNumberOfEdgesToFieldRef.current === null ||
-                previousNumberOfEdgesToFieldRef.current !== numberOfEdgesToField
-            ) {
-                // Use requestAnimationFrame for immediate but batched update
-                const frameId = requestAnimationFrame(() => {
-                    updateNodeInternals(tableNodeId);
-                    previousNumberOfEdgesToFieldRef.current =
-                        numberOfEdgesToField;
-                });
-                return () => cancelAnimationFrame(frameId);
-            }
-        }, [tableNodeId, updateNodeInternals, numberOfEdgesToField]);
 
         const {
             checkIfFieldRemoved,

@@ -3,6 +3,7 @@ import {
     mkdirSync,
     openSync,
     readFileSync,
+    renameSync,
     statSync,
     unlinkSync,
     writeFileSync,
@@ -72,6 +73,34 @@ export function acquireStateLock(
             closeSync(descriptor);
             descriptor = undefined;
             let released = false;
+            const updatePort = (listeningPort) => {
+                if (
+                    !Number.isInteger(listeningPort) ||
+                    listeningPort < 1 ||
+                    listeningPort > 65535
+                )
+                    throw new Error('KeepERD listening port is invalid.');
+                const current = readRecord(file);
+                if (released || current?.token !== token)
+                    throw new StateLockError(current);
+                const temporary = `${file}.${randomUUID()}.tmp`;
+                try {
+                    writeFileSync(
+                        temporary,
+                        `${JSON.stringify({ ...current, port: listeningPort })}\n`,
+                        { flag: 'wx', mode: 0o600 }
+                    );
+                    if (readRecord(file)?.token !== token)
+                        throw new StateLockError(readRecord(file));
+                    renameSync(temporary, file);
+                } finally {
+                    try {
+                        unlinkSync(temporary);
+                    } catch {
+                        /* Preserve the original lock update failure. */
+                    }
+                }
+            };
             const release = () => {
                 if (released) return;
                 released = true;
@@ -84,7 +113,7 @@ export function acquireStateLock(
                     }
                 }
             };
-            return { delegated: false, token, release };
+            return { delegated: false, token, updatePort, release };
         } catch (error) {
             if (descriptor !== undefined) {
                 closeSync(descriptor);

@@ -31,7 +31,7 @@ import {
     ResizablePanelGroup,
 } from '@/components/resizable/resizable';
 import { useTheme } from '@/hooks/use-theme';
-import type { OnChange } from '@monaco-editor/react';
+import type { Monaco, OnChange } from '@monaco-editor/react';
 import { useDebounce } from '@/hooks/use-debounce-v2';
 import { InstructionsSection } from './instructions-section/instructions-section';
 import { parseSQLError } from '@/lib/data/sql-import';
@@ -101,6 +101,7 @@ export const ImportDatabase: React.FC<ImportDatabaseProps> = ({
     const { effectiveTheme } = useTheme();
     const [errorMessage, setErrorMessage] = useState('');
     const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+    const monacoRef = useRef<Monaco>();
     const decorationsCollection = useRef<editor.IEditorDecorationsCollection>();
     const pasteDisposableRef = useRef<IDisposable | null>(null);
 
@@ -186,6 +187,7 @@ export const ImportDatabase: React.FC<ImportDatabaseProps> = ({
                         model: editorRef.current?.getModel(),
                         editorDecorationsCollection:
                             decorationsCollection.current,
+                        monacoInstance: monacoRef.current,
                     });
                 }
 
@@ -393,8 +395,9 @@ export const ImportDatabase: React.FC<ImportDatabaseProps> = ({
     }, [importMethod]);
 
     const handleEditorDidMount = useCallback(
-        (editor: editor.IStandaloneCodeEditor) => {
+        (editor: editor.IStandaloneCodeEditor, monacoInstance: Monaco) => {
             editorRef.current = editor;
+            monacoRef.current = monacoInstance;
             decorationsCollection.current =
                 editor.createDecorationsCollection();
 

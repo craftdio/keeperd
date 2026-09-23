@@ -61,7 +61,7 @@ it('persists edits in IndexedDB and restores them on another branch without losi
     await api!.getConfig();
     await api!.updateTable({
         id: 'featureusers',
-        attributes: { x: 123, color: 'green' },
+        attributes: { x: 123, color: '#0FA958' },
     });
     await api!.updateTable({ id: 'featureprofiles', attributes: { x: 456 } });
     cleanup();
@@ -77,7 +77,7 @@ it('persists edits in IndexedDB and restores them on another branch without losi
     expect(tables[0]).toMatchObject({
         id: 'developusers',
         x: 123,
-        color: 'green',
+        color: '#0FA958',
     });
     await api!.updateTable({ id: 'developusers', attributes: { x: 321 } });
     cleanup();
