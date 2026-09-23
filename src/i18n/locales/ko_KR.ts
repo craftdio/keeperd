@@ -531,6 +531,27 @@ export const ko_KR: LanguageTranslation = {
             no_area: '영역 없음',
         },
 
+        color_picker: {
+            choose_color: '색상 선택',
+            hex_color: 'HEX 색상',
+            invalid_hex: '6자리 HEX 색상을 입력하세요 (RRGGBB).',
+            apply: '적용',
+            cancel: '취소',
+            mixed: '혼합 색상',
+            current: '현재',
+            preview: '미리보기',
+            presets: '기본 색상',
+            hue: '색조',
+            saturation_brightness: '채도와 밝기',
+            saturation: '채도',
+            brightness: '밝기',
+        },
+
+        selected_table_colors: {
+            count: '선택한 테이블 {{count}}개',
+            mixed: '혼합 색상',
+        },
+
         canvas: {
             all_tables_hidden: '모든 테이블이 숨겨져 있습니다',
             show_all_tables: '모두 표시',

@@ -11,6 +11,7 @@
         "local:sync": "node tools/local-erd/sync.mjs",
         "local:migrate": "node tools/local-erd/migrate.mjs",
         "local:start": "node tools/local-erd/server.mjs",
+        "local:stop": "node tools/local-erd/stop.mjs",
         "local:build": "node tools/local-erd/build.mjs",
         "keeperd:bundle": "node tools/local-erd/release-bundle.mjs",
         "local:test": "vitest run src/lib/local-branch-merge.test.ts src/lib/chunk-load-recovery.test.ts tools/local-erd/home.test.js tools/local-erd/sync-ui.test.js tools/local-erd/layout-transfer.test.js",

@@ -47,6 +47,7 @@ import {
     TARGET_ID_PREFIX,
 } from './table-node/table-node-field';
 import { Toolbar } from './toolbar/toolbar';
+import { ViewportCenteredControls } from './viewport-centered-controls';
 import { useToast } from '@/components/toast/use-toast';
 import {
     Pencil,
@@ -115,6 +116,7 @@ import {
     getTablesInArea,
 } from '@/lib/utils/area-utils';
 import { CanvasFilter } from './canvas-filter/canvas-filter';
+import { SelectedTableColors } from './selected-table-colors';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { ShowAllButton } from './show-all-button';
 import { useIsLostInCanvas } from './hooks/use-is-lost-in-canvas';
@@ -124,10 +126,23 @@ import { filterTable } from '@/lib/domain/diagram-filter/filter';
 import { defaultSchemas } from '@/lib/data/default-schemas';
 import { useDiff } from '@/context/diff-context/use-diff';
 import { useClickAway } from 'react-use';
+import { getChangedTableHandleIds } from './table-handle-changes';
+import { initialTablesReady } from './initial-tables-ready';
+import {
+    measureCanvasInteraction,
+    measureCanvasViewport,
+} from './interaction-benchmark';
+import {
+    createEdgeHighlightIndex,
+    getHighlightedEdgeIds,
+    updateEdgeHighlights,
+} from './edge-highlights';
 import {
     getTableLevelOfDetail,
     getTableOverviewLabelScale,
+    type TableLevelOfDetail,
 } from './table-node/table-lod';
+import { TableLODContext } from './table-node/table-lod-context';
 
 const HIGHLIGHTED_EDGE_Z_INDEX = 1;
 const DEFAULT_EDGE_Z_INDEX = 0;
@@ -364,6 +379,25 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
     );
     const [edges, setEdges, onEdgesChange] =
         useEdgesState<EdgeType>(initialEdges);
+    const edgeHighlightIndex = useMemo(
+        () => createEdgeHighlightIndex(relationships, dependencies),
+        [relationships, dependencies]
+    );
+    const highlightedEdgeIds = useRef<ReadonlySet<string>>(new Set());
+    const selectedColorTableIds = useMemo(() => {
+        const editableIds = new Set(
+            tables.filter((table) => !table.isView).map((table) => table.id)
+        );
+        return nodes
+            .filter(
+                (node) =>
+                    node.type === 'table' &&
+                    node.selected &&
+                    !node.hidden &&
+                    editableIds.has(node.id)
+            )
+            .map((node) => node.id);
+    }, [nodes, tables]);
 
     const [snapToGridEnabled, setSnapToGridEnabled] = useState(false);
 
@@ -377,51 +411,95 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
     }, [initialTables]);
 
     useEffect(() => {
-        const initialNodes = initialTables.map((table) =>
-            tableToTableNode(table, {
-                filter,
-                databaseType,
-                filterLoading,
-                showDBViews,
-                forceShow: shouldForceShowTable(table.id),
-                isRelationshipCreatingTarget: false,
-            })
-        );
-        if (equal(initialNodes, nodes)) {
+        if (
+            initialTablesReady(
+                initialTables,
+                nodes.filter(
+                    (node): node is TableNodeType => node.type === 'table'
+                )
+            )
+        ) {
             setIsInitialLoadingNodes(false);
         }
-    }, [
-        initialTables,
-        nodes,
-        filter,
-        databaseType,
-        filterLoading,
-        showDBViews,
-        shouldForceShowTable,
-    ]);
+    }, [initialTables, nodes]);
 
     useEffect(() => {
-        if (!isInitialLoadingNodes) {
-            debounce(() => {
-                fitView({
-                    duration: 200,
-                    padding: 0.1,
-                    maxZoom: 0.8,
-                });
-            }, 500)();
-        }
+        if (isInitialLoadingNodes) return;
+        const timeoutId = setTimeout(() => {
+            fitView({ duration: 200, padding: 0.1, maxZoom: 0.8 });
+        }, 500);
+        return () => clearTimeout(timeoutId);
     }, [isInitialLoadingNodes, fitView]);
 
     useEffect(() => {
-        // Force React Flow to re-register handles for all table nodes
-        // This ensures handles exist before edges reference them
-        const tableNodeIds = tables.map((t) => t.id);
-        if (tableNodeIds.length > 0) {
-            updateNodeInternals(tableNodeIds);
+        if (
+            !new URLSearchParams(window.location.search).has(
+                'canvasBenchmark'
+            ) ||
+            typeof PerformanceObserver === 'undefined'
+        ) {
+            return;
         }
+        const observer = new PerformanceObserver((list) => {
+            const dataset = document.documentElement.dataset;
+            dataset.canvasBenchmarkLongTasks = String(
+                Number(dataset.canvasBenchmarkLongTasks ?? 0) +
+                    list.getEntries().length
+            );
+            dataset.canvasBenchmarkLongTaskMs = String(
+                Number(dataset.canvasBenchmarkLongTaskMs ?? 0) +
+                    list
+                        .getEntries()
+                        .reduce((total, entry) => total + entry.duration, 0)
+            );
+        });
+        try {
+            observer.observe({ type: 'longtask', buffered: true });
+        } catch {
+            // Some browsers do not implement the Long Tasks API.
+        }
+        return () => observer.disconnect();
+    }, []);
 
-        // Delay edge creation to ensure handles are registered
-        const timeoutId = setTimeout(() => {
+    useEffect(() => {
+        if (
+            initialTables.length === 0 ||
+            nodes.filter((node) => node.type === 'table').length <
+                initialTables.length ||
+            edges.length < relationships.length + dependencies.length ||
+            !new URLSearchParams(window.location.search).has('canvasBenchmark')
+        ) {
+            return;
+        }
+        let paintFrame = 0;
+        const frame = requestAnimationFrame(() => {
+            paintFrame = requestAnimationFrame(() => {
+                performance.mark('keeperd:canvas-ready', {
+                    detail: {
+                        tables: initialTables.length,
+                        relationships: relationships.length,
+                    },
+                });
+                document.documentElement.dataset.canvasBenchmarkReadyMs ??=
+                    performance.now().toFixed(1);
+            });
+        });
+        return () => {
+            cancelAnimationFrame(frame);
+            cancelAnimationFrame(paintFrame);
+        };
+    }, [
+        initialTables,
+        nodes,
+        relationships.length,
+        dependencies.length,
+        edges.length,
+    ]);
+
+    useEffect(() => {
+        // Commit the node/handle DOM first. React Flow then measures the handles
+        // and updates edge positions without a fixed 100 ms loading delay.
+        const frameId = requestAnimationFrame(() => {
             const targetIndexes: Record<string, number> = relationships.reduce(
                 (acc, relationship) => {
                     acc[
@@ -442,11 +520,12 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                 );
 
             setEdges((prevEdges) => {
+                const highlightedIds = highlightedEdgeIds.current;
                 // Create a map of previous edge states to preserve selection
                 const prevEdgeStates = new Map(
                     prevEdges.map((edge) => [
                         edge.id,
-                        { selected: edge.selected, animated: edge.animated },
+                        { selected: edge.selected },
                     ])
                 );
 
@@ -463,9 +542,17 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                                 sourceHandle: `${LEFT_HANDLE_ID_PREFIX}${relationship.sourceFieldId}`,
                                 targetHandle: `${TARGET_ID_PREFIX}${targetIndexes[`${relationship.targetTableId}${relationship.targetFieldId}`]++}_${relationship.targetFieldId}`,
                                 type: 'relationship-edge',
-                                data: { relationship },
+                                data: {
+                                    relationship,
+                                    highlighted: highlightedIds.has(
+                                        relationship.id
+                                    ),
+                                },
                                 selected: prevState?.selected ?? false,
-                                animated: prevState?.animated ?? false,
+                                animated: highlightedIds.has(relationship.id),
+                                zIndex: highlightedIds.has(relationship.id)
+                                    ? HIGHLIGHTED_EDGE_Z_INDEX
+                                    : DEFAULT_EDGE_Z_INDEX,
                             };
                         }
                     ),
@@ -478,25 +565,24 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                             sourceHandle: `${TOP_SOURCE_HANDLE_ID_PREFIX}${dep.dependentTableId}`,
                             targetHandle: `${TARGET_DEP_PREFIX}${targetDepIndexes[dep.tableId]++}_${dep.tableId}`,
                             type: 'dependency-edge',
-                            data: { dependency: dep },
+                            data: {
+                                dependency: dep,
+                                highlighted: highlightedIds.has(dep.id),
+                            },
                             hidden: !showDBViews,
                             selected: prevState?.selected ?? false,
-                            animated: prevState?.animated ?? false,
+                            animated: highlightedIds.has(dep.id),
+                            zIndex: highlightedIds.has(dep.id)
+                                ? HIGHLIGHTED_EDGE_Z_INDEX
+                                : DEFAULT_EDGE_Z_INDEX,
                         };
                     }),
                 ];
             });
-        }, 100); // Delay to let handles register after updateNodeInternals
+        });
 
-        return () => clearTimeout(timeoutId);
-    }, [
-        relationships,
-        dependencies,
-        setEdges,
-        showDBViews,
-        tables,
-        updateNodeInternals,
-    ]);
+        return () => cancelAnimationFrame(frameId);
+    }, [relationships, dependencies, setEdges, showDBViews]);
 
     useEffect(() => {
         const selectedNodesIds = nodes
@@ -523,75 +609,50 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
     }, [edges, setSelectedRelationshipIds, selectedRelationshipIds]);
 
     useEffect(() => {
-        const selectedTableIdsSet = new Set(selectedTableIds);
-        const selectedRelationshipIdsSet = new Set(selectedRelationshipIds);
+        const nextHighlightedIds = getHighlightedEdgeIds(
+            edgeHighlightIndex,
+            selectedTableIds,
+            selectedRelationshipIds
+        );
+        const previousHighlightedIds = highlightedEdgeIds.current;
+        highlightedEdgeIds.current = nextHighlightedIds;
+        setEdges((prevEdges) =>
+            updateEdgeHighlights(
+                prevEdges,
+                edgeHighlightIndex,
+                nextHighlightedIds,
+                previousHighlightedIds,
+                HIGHLIGHTED_EDGE_Z_INDEX,
+                DEFAULT_EDGE_Z_INDEX
+            )
+        );
+    }, [
+        edgeHighlightIndex,
+        selectedRelationshipIds,
+        selectedTableIds,
+        setEdges,
+    ]);
 
-        setEdges((prevEdges) => {
-            // Check if any edge needs updating
-            let hasChanges = false;
-
-            const newEdges = prevEdges
-                .filter((e) => e.type !== 'temp-floating-edge')
-                .map((edge): EdgeType => {
-                    const shouldBeHighlighted =
-                        selectedRelationshipIdsSet.has(edge.id) ||
-                        selectedTableIdsSet.has(edge.source) ||
-                        selectedTableIdsSet.has(edge.target);
-
-                    const currentHighlighted =
-                        (edge as Exclude<EdgeType, TempFloatingEdgeType>).data
-                            ?.highlighted ?? false;
-                    const currentAnimated = edge.animated ?? false;
-                    const currentZIndex = edge.zIndex ?? 0;
-
-                    // Skip if no changes needed
-                    if (
-                        currentHighlighted === shouldBeHighlighted &&
-                        currentAnimated === shouldBeHighlighted &&
-                        currentZIndex ===
-                            (shouldBeHighlighted
-                                ? HIGHLIGHTED_EDGE_Z_INDEX
-                                : DEFAULT_EDGE_Z_INDEX)
-                    ) {
-                        return edge;
-                    }
-
-                    hasChanges = true;
-
-                    if (edge.type === 'dependency-edge') {
-                        const dependencyEdge = edge as DependencyEdgeType;
-                        return {
-                            ...dependencyEdge,
-                            data: {
-                                ...dependencyEdge.data!,
-                                highlighted: shouldBeHighlighted,
-                            },
-                            animated: shouldBeHighlighted,
-                            zIndex: shouldBeHighlighted
-                                ? HIGHLIGHTED_EDGE_Z_INDEX
-                                : DEFAULT_EDGE_Z_INDEX,
-                        };
-                    } else {
-                        const relationshipEdge = edge as RelationshipEdgeType;
-                        return {
-                            ...relationshipEdge,
-                            data: {
-                                ...relationshipEdge.data!,
-                                highlighted: shouldBeHighlighted,
-                            },
-                            animated: shouldBeHighlighted,
-                            zIndex: shouldBeHighlighted
-                                ? HIGHLIGHTED_EDGE_Z_INDEX
-                                : DEFAULT_EDGE_Z_INDEX,
-                        };
-                    }
-                });
-
-            return hasChanges ? newEdges : prevEdges;
-        });
-    }, [selectedRelationshipIds, selectedTableIds, setEdges]);
-
+    const previousNodeBuildInputs = useRef<unknown[] | null>(null);
     useEffect(() => {
+        const nodeBuildInputs = [
+            filter,
+            databaseType,
+            overlapGraph.lastUpdated,
+            overlapGraph.graph,
+            highlightOverlappingTables,
+            highlightedCustomType,
+            filterLoading,
+            showDBViews,
+            shouldForceShowTable,
+            relationships,
+        ];
+        const canReuseTableNodes =
+            previousNodeBuildInputs.current?.every((input, index) =>
+                Object.is(input, nodeBuildInputs[index])
+            ) ?? false;
+        previousNodeBuildInputs.current = nodeBuildInputs;
+
         // Compute target edge counts per field (same logic as edge creation)
         // This ensures handle creation is synchronized with edge indices
         const targetEdgeCountsByField: Record<string, number> = {};
@@ -602,8 +663,30 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
         });
 
         setNodes((prevNodes) => {
+            const previousById = new Map(
+                prevNodes.map((node) => [node.id, node])
+            );
+            const preserveChangedNode = (node: NodeType): NodeType => {
+                const previous = previousById.get(node.id);
+                return previous
+                    ? preserveInteraction(
+                          [node],
+                          [previous],
+                          resizingNodes.current
+                      )[0]
+                    : node;
+            };
             const newNodes = [
                 ...tables.map((table) => {
+                    const previous = previousById.get(table.id);
+                    if (
+                        canReuseTableNodes &&
+                        previous?.type === 'table' &&
+                        previous.data.table === table
+                    ) {
+                        return previous;
+                    }
+
                     const isOverlapping =
                         (overlapGraph.graph.get(table.id) ?? []).length > 0;
 
@@ -635,7 +718,7 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                         );
                     }
 
-                    return {
+                    return preserveChangedNode({
                         ...node,
                         data: {
                             ...node.data,
@@ -643,17 +726,25 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                             highlightOverlappingTables,
                             hasHighlightedCustomType,
                         },
-                    };
+                    }) as TableNodeType;
                 }),
                 ...areas.map((area) =>
-                    areaToAreaNode(area, {
-                        tables,
-                        filter,
-                        databaseType,
-                        filterLoading,
-                    })
+                    preserveChangedNode(
+                        areaToAreaNode(area, {
+                            tables,
+                            filter,
+                            databaseType,
+                            filterLoading,
+                        })
+                    )
                 ),
-                ...notes.map((note) => noteToNoteNode(note)),
+                ...notes.map((note) => {
+                    const previous = previousById.get(note.id);
+                    return previous?.type === 'note' &&
+                        previous.data.note === note
+                        ? previous
+                        : preserveChangedNode(noteToNoteNode(note));
+                }),
                 ...prevNodes.filter(
                     (n) =>
                         n.type === 'temp-cursor' ||
@@ -661,16 +752,14 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                 ),
             ];
 
-            // Check if nodes actually changed
-            if (equal(prevNodes, newNodes)) {
+            if (
+                prevNodes.length === newNodes.length &&
+                prevNodes.every((node, index) => node === newNodes[index])
+            ) {
                 return prevNodes;
             }
 
-            return preserveInteraction(
-                newNodes,
-                prevNodes,
-                resizingNodes.current
-            );
+            return newNodes;
         });
     }, [
         tables,
@@ -688,6 +777,42 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
         shouldForceShowTable,
         relationships,
     ]);
+
+    const handleSignatures = useRef(new Map<string, string>());
+    useEffect(() => {
+        const { changedIds, signatures } = getChangedTableHandleIds(
+            tables,
+            relationships,
+            dependencies,
+            handleSignatures.current
+        );
+        handleSignatures.current = signatures;
+        if (changedIds.length === 0) return;
+
+        // The node update above must render its new handle DOM before React Flow
+        // measures it. Refresh all affected tables in one call, not per field.
+        const frameId = requestAnimationFrame(() => {
+            updateNodeInternals(changedIds);
+            if (
+                new URLSearchParams(window.location.search).has(
+                    'canvasBenchmark'
+                )
+            ) {
+                performance.mark('keeperd:handle-refresh', {
+                    detail: { tables: changedIds.length },
+                });
+                const dataset = document.documentElement.dataset;
+                dataset.canvasBenchmarkRefreshCalls = String(
+                    Number(dataset.canvasBenchmarkRefreshCalls ?? 0) + 1
+                );
+                dataset.canvasBenchmarkRefreshTables = String(
+                    Number(dataset.canvasBenchmarkRefreshTables ?? 0) +
+                        changedIds.length
+                );
+            }
+        });
+        return () => cancelAnimationFrame(frameId);
+    }, [tables, relationships, dependencies, updateNodeInternals]);
 
     // Surgical update for relationship creation target highlighting
     // This avoids expensive full node recalculation when only the visual state changes
@@ -720,7 +845,7 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
         });
     }, [tempFloatingEdge?.sourceNodeId, setNodes]);
 
-    const prevFilter = useRef<DiagramFilter | undefined>(undefined);
+    const prevFilter = useRef<DiagramFilter | undefined>(filter);
     const prevShowDBViews = useRef<boolean>(showDBViews);
     useEffect(() => {
         if (
@@ -1042,6 +1167,15 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
 
     const onNodesChangeHandler: OnNodesChange<NodeType> = useCallback(
         (changes) => {
+            if (changes.some((change) => change.type === 'select')) {
+                measureCanvasInteraction('select');
+            } else if (
+                changes.some(
+                    (change) => change.type === 'position' && !change.dragging
+                )
+            ) {
+                measureCanvasInteraction('drag');
+            }
             for (const change of changes) {
                 if (change.type === 'dimensions') {
                     if (change.resizing === true)
@@ -1531,11 +1665,17 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
     }, []);
 
     const containerRef = useRef<HTMLDivElement>(null);
+    const [tableLOD, setTableLOD] = useState<TableLevelOfDetail>('detail');
+    const tableLODRef = useRef<TableLevelOfDetail>('detail');
     const updateTableLevelOfDetail = useCallback((zoom: number) => {
         const container = containerRef.current;
         if (!container) return;
 
-        container.dataset.tableLod = getTableLevelOfDetail(zoom);
+        const next = getTableLevelOfDetail(zoom);
+        if (tableLODRef.current !== next) {
+            tableLODRef.current = next;
+            setTableLOD(next);
+        }
         container.style.setProperty(
             '--table-overview-label-scale',
             String(getTableOverviewLabelScale(zoom))
@@ -1709,182 +1849,227 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                 className="relative flex h-full"
                 id="canvas"
                 ref={containerRef}
-                data-table-lod="detail"
+                data-table-lod={tableLOD}
                 onMouseMove={handleMouseMove}
             >
-                <ReactFlow
-                    onlyRenderVisibleElements
-                    colorMode={effectiveTheme}
-                    className={cn('nodes-animated', {
-                        'canvas-cursor-multi-select': shiftPressed,
-                        'canvas-cursor-default': !shiftPressed,
-                    })}
-                    nodes={nodesWithCursor}
-                    edges={edgesWithFloating}
-                    onNodesChange={onNodesChangeHandler}
-                    onEdgesChange={onEdgesChangeHandler}
-                    maxZoom={5}
-                    minZoom={0.1}
-                    onMove={(_, viewport) =>
-                        updateTableLevelOfDetail(viewport.zoom)
-                    }
-                    onConnect={onConnectHandler}
-                    proOptions={{
-                        hideAttribution: true,
-                    }}
-                    fitView={false}
-                    nodeTypes={nodeTypes}
-                    edgeTypes={edgeTypes}
-                    defaultEdgeOptions={{
-                        animated: false,
-                        type: 'relationship-edge',
-                    }}
-                    panOnScroll={scrollAction === 'pan'}
-                    snapToGrid={shiftPressed || snapToGridEnabled}
-                    snapGrid={[20, 20]}
-                    selectionMode={SelectionMode.Full}
-                    onPaneClick={onPaneClickHandler}
-                    connectionLineComponent={ConnectionLine}
-                    deleteKeyCode={['Backspace', 'Delete']}
-                    multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
-                >
-                    <Controls
-                        position="top-left"
-                        showZoom={false}
-                        showFitView={false}
-                        showInteractive={false}
-                        className="!shadow-none"
+                <TableLODContext.Provider value={tableLOD}>
+                    <ReactFlow
+                        onlyRenderVisibleElements
+                        colorMode={effectiveTheme}
+                        className={cn('nodes-animated', {
+                            'canvas-cursor-multi-select': shiftPressed,
+                            'canvas-cursor-default': !shiftPressed,
+                        })}
+                        nodes={nodesWithCursor}
+                        edges={edgesWithFloating}
+                        onNodesChange={onNodesChangeHandler}
+                        onEdgesChange={onEdgesChangeHandler}
+                        maxZoom={5}
+                        minZoom={0.1}
+                        onMove={(_, viewport) =>
+                            updateTableLevelOfDetail(viewport.zoom)
+                        }
+                        onMoveEnd={measureCanvasViewport}
+                        onConnect={onConnectHandler}
+                        proOptions={{
+                            hideAttribution: true,
+                        }}
+                        fitView={false}
+                        nodeTypes={nodeTypes}
+                        edgeTypes={edgeTypes}
+                        defaultEdgeOptions={{
+                            animated: false,
+                            type: 'relationship-edge',
+                        }}
+                        panOnScroll={scrollAction === 'pan'}
+                        snapToGrid={shiftPressed || snapToGridEnabled}
+                        snapGrid={[20, 20]}
+                        selectionMode={SelectionMode.Full}
+                        onPaneClick={onPaneClickHandler}
+                        connectionLineComponent={ConnectionLine}
+                        deleteKeyCode={['Backspace', 'Delete']}
+                        multiSelectionKeyCode={['Shift', 'Meta', 'Control']}
                     >
-                        <div className="flex flex-col items-center gap-2 md:flex-row">
-                            {!readonly ? (
-                                <>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <span>
-                                                <Button
-                                                    variant="secondary"
-                                                    className={cn(
-                                                        'size-8 p-1 shadow-none',
-                                                        snapToGridEnabled ||
-                                                            shiftPressed
-                                                            ? 'bg-pink-600 text-white hover:bg-pink-500 dark:hover:bg-pink-700 hover:text-white'
-                                                            : ''
-                                                    )}
-                                                    onClick={() =>
-                                                        setSnapToGridEnabled(
-                                                            (prev) => !prev
-                                                        )
-                                                    }
-                                                >
-                                                    <Magnet className="size-4" />
-                                                </Button>
-                                            </span>
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                            {t('snap_to_grid_tooltip', {
-                                                key:
-                                                    operatingSystem === 'mac'
-                                                        ? '⇧'
-                                                        : 'Shift',
-                                            })}
-                                        </TooltipContent>
-                                    </Tooltip>
-                                    {highlightedCustomType ? (
+                        <Controls
+                            position="top-left"
+                            showZoom={false}
+                            showFitView={false}
+                            showInteractive={false}
+                            className="!shadow-none"
+                        >
+                            <div className="flex flex-col items-center gap-2 md:flex-row">
+                                {!readonly ? (
+                                    <>
                                         <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <span>
                                                     <Button
                                                         variant="secondary"
-                                                        className="size-8 border border-yellow-400 bg-yellow-200 p-1 shadow-none hover:bg-yellow-300 dark:border-yellow-700 dark:bg-yellow-800 dark:hover:bg-yellow-700"
+                                                        className={cn(
+                                                            'size-8 p-1 shadow-none',
+                                                            snapToGridEnabled ||
+                                                                shiftPressed
+                                                                ? 'bg-pink-600 text-white hover:bg-pink-500 dark:hover:bg-pink-700 hover:text-white'
+                                                                : ''
+                                                        )}
                                                         onClick={() =>
-                                                            highlightCustomTypeId(
-                                                                undefined
+                                                            setSnapToGridEnabled(
+                                                                (prev) => !prev
                                                             )
                                                         }
                                                     >
-                                                        <Highlighter className="size-4" />
+                                                        <Magnet className="size-4" />
                                                     </Button>
                                                 </span>
                                             </TooltipTrigger>
                                             <TooltipContent>
-                                                {t(
-                                                    'toolbar.custom_type_highlight_tooltip',
-                                                    {
-                                                        typeName:
-                                                            highlightedCustomType.name,
-                                                    }
-                                                )}
+                                                {t('snap_to_grid_tooltip', {
+                                                    key:
+                                                        operatingSystem ===
+                                                        'mac'
+                                                            ? '⇧'
+                                                            : 'Shift',
+                                                })}
                                             </TooltipContent>
                                         </Tooltip>
-                                    ) : null}
-                                </>
-                            ) : null}
+                                        {highlightedCustomType ? (
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <span>
+                                                        <Button
+                                                            variant="secondary"
+                                                            className="size-8 border border-yellow-400 bg-yellow-200 p-1 shadow-none hover:bg-yellow-300 dark:border-yellow-700 dark:bg-yellow-800 dark:hover:bg-yellow-700"
+                                                            onClick={() =>
+                                                                highlightCustomTypeId(
+                                                                    undefined
+                                                                )
+                                                            }
+                                                        >
+                                                            <Highlighter className="size-4" />
+                                                        </Button>
+                                                    </span>
+                                                </TooltipTrigger>
+                                                <TooltipContent>
+                                                    {t(
+                                                        'toolbar.custom_type_highlight_tooltip',
+                                                        {
+                                                            typeName:
+                                                                highlightedCustomType.name,
+                                                        }
+                                                    )}
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        ) : null}
+                                    </>
+                                ) : null}
 
-                            <div
-                                className={`transition-opacity duration-300 ease-in-out ${
-                                    hasOverlappingTables
-                                        ? 'opacity-100'
-                                        : 'opacity-0'
-                                }`}
-                            >
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <span>
-                                            <Button
-                                                variant="default"
-                                                className="size-8 p-1 shadow-none"
-                                                onClick={pulseOverlappingTables}
-                                            >
-                                                <AlertTriangle className="size-4 text-white" />
-                                            </Button>
-                                        </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        {t(
-                                            'toolbar.highlight_overlapping_tables'
-                                        )}
-                                    </TooltipContent>
-                                </Tooltip>
+                                <div
+                                    className={`transition-opacity duration-300 ease-in-out ${
+                                        hasOverlappingTables
+                                            ? 'opacity-100'
+                                            : 'opacity-0'
+                                    }`}
+                                >
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <span>
+                                                <Button
+                                                    variant="default"
+                                                    className="size-8 p-1 shadow-none"
+                                                    onClick={
+                                                        pulseOverlappingTables
+                                                    }
+                                                >
+                                                    <AlertTriangle className="size-4 text-white" />
+                                                </Button>
+                                            </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            {t(
+                                                'toolbar.highlight_overlapping_tables'
+                                            )}
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </div>
                             </div>
-                        </div>
-                    </Controls>
-                    {isLoadingDOM ? (
-                        <Controls
-                            position="top-center"
-                            orientation="horizontal"
-                            showZoom={false}
-                            showFitView={false}
-                            showInteractive={false}
-                            className="!shadow-none"
-                        >
-                            <Badge
-                                variant="default"
-                                className="bg-pink-600 text-white"
-                            >
-                                {t('loading_diagram')}
-                            </Badge>
                         </Controls>
-                    ) : null}
+                        {isLoadingDOM ? (
+                            <Controls
+                                position="top-center"
+                                orientation="horizontal"
+                                showZoom={false}
+                                showFitView={false}
+                                showInteractive={false}
+                                className="!shadow-none"
+                            >
+                                <Badge
+                                    variant="default"
+                                    className="bg-pink-600 text-white"
+                                >
+                                    {t('loading_diagram')}
+                                </Badge>
+                            </Controls>
+                        ) : null}
 
-                    {!isDesktop && !readonly ? (
-                        <Controls
-                            position="bottom-left"
-                            orientation="horizontal"
-                            showZoom={false}
-                            showFitView={false}
-                            showInteractive={false}
-                            className="!shadow-none"
-                        >
-                            <Button
-                                className="size-11 bg-pink-600 p-2 hover:bg-pink-500"
-                                onClick={showSidePanel}
+                        {!readonly && selectedColorTableIds.length > 0 ? (
+                            <ViewportCenteredControls
+                                desktop={isDesktop}
+                                position="bottom-center"
+                                orientation="horizontal"
+                                showZoom={false}
+                                showFitView={false}
+                                showInteractive={false}
+                                className="!shadow-none"
+                                style={{ bottom: isDesktop ? '70px' : '20px' }}
                             >
-                                <Pencil />
-                            </Button>
-                        </Controls>
-                    ) : null}
-                    {isLostInCanvas ? (
-                        <Controls
+                                <SelectedTableColors
+                                    selectedTableIds={selectedColorTableIds}
+                                />
+                            </ViewportCenteredControls>
+                        ) : null}
+
+                        {!isDesktop && !readonly ? (
+                            <Controls
+                                position="bottom-left"
+                                orientation="horizontal"
+                                showZoom={false}
+                                showFitView={false}
+                                showInteractive={false}
+                                className="!shadow-none"
+                            >
+                                <Button
+                                    className="size-11 bg-pink-600 p-2 hover:bg-pink-500"
+                                    onClick={showSidePanel}
+                                >
+                                    <Pencil />
+                                </Button>
+                            </Controls>
+                        ) : null}
+                        {isLostInCanvas ? (
+                            <ViewportCenteredControls
+                                desktop={isDesktop}
+                                position={
+                                    isDesktop ? 'bottom-center' : 'top-center'
+                                }
+                                orientation="horizontal"
+                                showZoom={false}
+                                showFitView={false}
+                                showInteractive={false}
+                                className="!shadow-none"
+                                style={{
+                                    [isDesktop ? 'bottom' : 'top']: isDesktop
+                                        ? selectedColorTableIds.length > 0 &&
+                                          !readonly
+                                            ? '130px'
+                                            : '70px'
+                                        : '70px',
+                                }}
+                            >
+                                <ShowAllButton />
+                            </ViewportCenteredControls>
+                        ) : null}
+                        <ViewportCenteredControls
+                            desktop={isDesktop}
                             position={
                                 isDesktop ? 'bottom-center' : 'top-center'
                             }
@@ -1893,60 +2078,47 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                             showFitView={false}
                             showInteractive={false}
                             className="!shadow-none"
-                            style={{
-                                [isDesktop ? 'bottom' : 'top']: isDesktop
-                                    ? '70px'
-                                    : '70px',
-                            }}
                         >
-                            <ShowAllButton />
-                        </Controls>
-                    ) : null}
-                    <Controls
-                        position={isDesktop ? 'bottom-center' : 'top-center'}
-                        orientation="horizontal"
-                        showZoom={false}
-                        showFitView={false}
-                        showInteractive={false}
-                        className="!shadow-none"
-                    >
-                        <Toolbar readonly={readonly} />
-                    </Controls>
-                    {showMiniMapOnCanvas && (
-                        <MiniMap
-                            style={{
-                                width: isDesktop ? 100 : 60,
-                                height: isDesktop ? 100 : 60,
-                            }}
+                            <Toolbar readonly={readonly} />
+                        </ViewportCenteredControls>
+                        {showMiniMapOnCanvas && (
+                            <MiniMap
+                                style={{
+                                    width: isDesktop ? 100 : 60,
+                                    height: isDesktop ? 100 : 60,
+                                }}
+                            />
+                        )}
+                        <Background
+                            variant={BackgroundVariant.Dots}
+                            gap={16}
+                            size={1}
                         />
-                    )}
-                    <Background
-                        variant={BackgroundVariant.Dots}
-                        gap={16}
-                        size={1}
-                    />
-                    {/* Empty state when all tables are hidden by filter */}
-                    {allTablesHiddenByFilter && (
-                        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-                            <div className="pointer-events-auto flex items-center gap-3 rounded-lg border bg-background/90 px-4 py-3 shadow-sm backdrop-blur-sm">
-                                <EyeOff className="size-5 text-muted-foreground" />
-                                <span className="text-sm text-muted-foreground">
-                                    {t('canvas.all_tables_hidden')}
-                                </span>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => resetFilter()}
-                                >
-                                    {t('canvas.show_all_tables')}
-                                </Button>
+                        {/* Empty state when all tables are hidden by filter */}
+                        {allTablesHiddenByFilter && (
+                            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+                                <div className="pointer-events-auto flex items-center gap-3 rounded-lg border bg-background/90 px-4 py-3 shadow-sm backdrop-blur-sm">
+                                    <EyeOff className="size-5 text-muted-foreground" />
+                                    <span className="text-sm text-muted-foreground">
+                                        {t('canvas.all_tables_hidden')}
+                                    </span>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => resetFilter()}
+                                    >
+                                        {t('canvas.show_all_tables')}
+                                    </Button>
+                                </div>
                             </div>
-                        </div>
-                    )}
-                    {showFilter ? (
-                        <CanvasFilter onClose={() => setShowFilter(false)} />
-                    ) : null}
-                </ReactFlow>
+                        )}
+                        {showFilter ? (
+                            <CanvasFilter
+                                onClose={() => setShowFilter(false)}
+                            />
+                        ) : null}
+                    </ReactFlow>
+                </TableLODContext.Provider>
                 <MarkerDefinitions />
             </div>
         </CanvasContextMenu>

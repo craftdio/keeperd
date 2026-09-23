@@ -215,7 +215,7 @@ function renderWorktrees() {
     worktree.value = selectedWorktree;
     worktreePicker.refresh();
 }
-function choose() {
+function choose(refreshBranches = false) {
     selected = repository.value;
     if (isLocal()) renderWorktrees();
     repoPicker.refresh();
@@ -242,6 +242,7 @@ function choose() {
                               ?.url) ?? selected,
                 primaryUrl,
                 localId: isLocal() ? selectedWorktree : '',
+                refreshBranches,
             },
         })
     );
@@ -339,7 +340,7 @@ async function load(refresh = false) {
         const user = await json(`/api/account${cacheQuery}`);
         if (request !== loadRequest) return;
         guide.hidden = true;
-        retry.textContent = '계정·레포 목록 새로고침';
+        retry.textContent = '계정·레포·선택 브랜치 새로고침';
         showAccount(user);
         status.textContent = 'GitHub 레포를 불러오는 중…';
         const [repos, data] = await Promise.all([
@@ -374,7 +375,7 @@ async function load(refresh = false) {
         renderOwners();
         renderRepositories();
         controls.hidden = false;
-        choose();
+        choose(refresh);
         refreshControls();
     } catch (error) {
         if (request !== loadRequest) return;

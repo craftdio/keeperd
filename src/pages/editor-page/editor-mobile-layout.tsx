@@ -15,6 +15,8 @@ import { TopNavbarMobile } from './top-navbar/top-navbar-mobile';
 import { SidebarProvider } from '@/components/sidebar/sidebar';
 import { EditorSidebar } from './editor-sidebar/editor-sidebar';
 
+const EMPTY_TABLES: NonNullable<Diagram['tables']> = [];
+
 export interface EditorMobileLayoutProps {
     initialDiagram?: Diagram;
 }
@@ -46,7 +48,9 @@ export const EditorMobileLayout: React.FC<EditorMobileLayoutProps> = ({
                         <SidePanel data-vaul-no-drag />
                     </DrawerContent>
                 </Drawer>
-                <Canvas initialTables={initialDiagram?.tables ?? []} />
+                <Canvas
+                    initialTables={initialDiagram?.tables ?? EMPTY_TABLES}
+                />
             </SidebarProvider>
         </>
     );

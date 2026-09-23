@@ -524,6 +524,27 @@ export const en = {
             no_area: 'No Area',
         },
 
+        color_picker: {
+            choose_color: 'Choose color',
+            hex_color: 'HEX color',
+            invalid_hex: 'Enter a 6-digit HEX color (RRGGBB).',
+            apply: 'Apply',
+            cancel: 'Cancel',
+            mixed: 'Mixed colors',
+            current: 'Current',
+            preview: 'Preview',
+            presets: 'Preset colors',
+            hue: 'Hue',
+            saturation_brightness: 'Saturation and brightness',
+            saturation: 'saturation',
+            brightness: 'brightness',
+        },
+
+        selected_table_colors: {
+            count: 'Selected tables: {{count}}',
+            mixed: 'Mixed colors',
+        },
+
         canvas: {
             all_tables_hidden: 'All tables are hidden',
             show_all_tables: 'Show all',

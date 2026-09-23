@@ -49,9 +49,13 @@ test(
             mkdirSync(tools, { recursive: true });
             for (const file of [
                 'sync.mjs',
+                'alembic-replay.mjs',
+                'airflow-replay.mjs',
                 'atomic-publish.mjs',
                 'branches.mjs',
                 'local-source.mjs',
+                'schema-replay.mjs',
+                'sync-errors.mjs',
                 'git-credentials.mjs',
                 'state-paths.mjs',
                 'state-lock.mjs',

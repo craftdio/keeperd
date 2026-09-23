@@ -5,8 +5,15 @@ const response = (payload) => ({
     ok: true,
     json: async () => payload,
 });
+const switchers = [];
+const makeSwitcher = (options) => {
+    const switcher = createRepositorySwitcher(options);
+    switchers.push(switcher);
+    return switcher;
+};
 
 afterEach(() => {
+    for (const switcher of switchers.splice(0)) switcher.destroy();
     vi.unstubAllGlobals();
     document.documentElement.innerHTML = '';
 });
@@ -49,7 +56,7 @@ it('switches organization, repository, and branch before syncing', async () => {
         })
     );
     const onChoose = vi.fn();
-    createRepositorySwitcher({
+    makeSwitcher({
         getCurrent: () => ({ repositoryUrl: first, branch: 'develop' }),
         onChoose,
     });
@@ -134,7 +141,7 @@ it('selects a registered local repository, worktree, and branch', async () => {
         })
     );
     const onChoose = vi.fn();
-    createRepositorySwitcher({
+    makeSwitcher({
         getCurrent: () => ({
             repositoryUrl,
             branch: 'feat/local',
@@ -176,4 +183,138 @@ it('selects a registered local repository, worktree, and branch', async () => {
             mode: 'commit',
         })
     );
+});
+
+it('refreshes remote branches, preserves selection, and explains a deleted branch', async () => {
+    const repositoryUrl = 'https://github.com/alpha/backend.git';
+    let branches = ['main'];
+    const fetch = vi.fn(async (path) =>
+        path === '/api/repositories'
+            ? response({
+                  repositories: [{ name: 'alpha/backend', url: repositoryUrl }],
+              })
+            : response({
+                  branches: path.includes('refresh=1') ? branches : ['main'],
+              })
+    );
+    vi.stubGlobal('fetch', fetch);
+    makeSwitcher({
+        getCurrent: () => ({ repositoryUrl, branch: 'main' }),
+        onChoose: vi.fn(),
+    });
+    window.dispatchEvent(new CustomEvent('local-erd-switcher'));
+    const branch = document.querySelector('#switcher-branch');
+    const refresh = document.querySelector('#switcher-branch-refresh');
+    await vi.waitFor(() => expect(branch.value).toBe('main'));
+    branches = ['main', 'feature/new'];
+    refresh.click();
+    await vi.waitFor(() =>
+        expect([...branch.options].map((item) => item.value)).toContain(
+            'feature/new'
+        )
+    );
+    expect(branch.value).toBe('main');
+    branches = ['feature/new'];
+    refresh.click();
+    await vi.waitFor(() => expect(branch.value).toBe('feature/new'));
+    expect(document.querySelector('.switcher-status').textContent).toContain(
+        'main'
+    );
+    expect(
+        fetch.mock.calls.filter(([path]) => path.includes('refresh=1'))
+    ).toHaveLength(2);
+});
+
+it('re-reads local branches and retains existing choices when refresh fails', async () => {
+    const repositoryUrl = 'https://github.com/alpha/backend.git';
+    let branches = ['main'];
+    let fail = false;
+    const fetch = vi.fn(async (path) =>
+        path === '/api/local/repositories'
+            ? response({
+                  repositories: [
+                      {
+                          id: 'local-id',
+                          repositoryUrl,
+                          path: '/repo',
+                          currentBranch: 'main',
+                      },
+                  ],
+              })
+            : fail
+              ? { ok: false, json: async () => ({ error: 'Git unavailable' }) }
+              : response({ current: 'main', branches })
+    );
+    vi.stubGlobal('fetch', fetch);
+    makeSwitcher({
+        getCurrent: () => ({
+            repositoryUrl,
+            branch: 'main',
+            localId: 'local-id',
+        }),
+        onChoose: vi.fn(),
+    });
+    window.dispatchEvent(new CustomEvent('local-erd-switcher'));
+    const branch = document.querySelector('#switcher-branch');
+    const refresh = document.querySelector('#switcher-branch-refresh');
+    await vi.waitFor(() => expect(branch.value).toBe('main'));
+    branches = ['main', 'local-new'];
+    refresh.click();
+    await vi.waitFor(() =>
+        expect([...branch.options].map((item) => item.value)).toContain(
+            'local-new'
+        )
+    );
+    fail = true;
+    refresh.click();
+    await vi.waitFor(() =>
+        expect(document.querySelector('.switcher-status').textContent).toBe(
+            'Git unavailable'
+        )
+    );
+    expect(branch.value).toBe('main');
+    expect(
+        fetch.mock.calls.filter(([path]) =>
+            path.startsWith('/api/local/branches')
+        )
+    ).toHaveLength(3);
+});
+
+it('ignores a late branch response after selecting another repository', async () => {
+    const first = 'https://github.com/alpha/first.git';
+    const second = 'https://github.com/alpha/second.git';
+    let finishFirst;
+    vi.stubGlobal(
+        'fetch',
+        vi.fn((path) => {
+            if (path === '/api/repositories')
+                return Promise.resolve(
+                    response({
+                        repositories: [
+                            { name: 'alpha/first', url: first },
+                            { name: 'alpha/second', url: second },
+                        ],
+                    })
+                );
+            if (path.includes(encodeURIComponent(first)))
+                return new Promise((resolve) => {
+                    finishFirst = resolve;
+                });
+            return Promise.resolve(response({ branches: ['second-branch'] }));
+        })
+    );
+    makeSwitcher({
+        getCurrent: () => ({ repositoryUrl: first, branch: 'main' }),
+        onChoose: vi.fn(),
+    });
+    window.dispatchEvent(new CustomEvent('local-erd-switcher'));
+    await vi.waitFor(() => expect(finishFirst).toBeTypeOf('function'));
+    const repository = document.querySelector('#switcher-repository');
+    repository.value = second;
+    repository.dispatchEvent(new Event('change'));
+    const branch = document.querySelector('#switcher-branch');
+    await vi.waitFor(() => expect(branch.value).toBe('second-branch'));
+    finishFirst(response({ branches: ['stale-branch'] }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(branch.value).toBe('second-branch');
 });

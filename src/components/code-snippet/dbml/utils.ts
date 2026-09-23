@@ -1,23 +1,26 @@
 import type { DBMLError } from '@/lib/dbml/dbml-import/dbml-import-error';
-import * as monaco from 'monaco-editor';
+import type * as monaco from 'monaco-editor';
 
 export const highlightErrorLine = ({
     error,
     model,
     editorDecorationsCollection,
+    monacoInstance,
 }: {
     error: DBMLError;
     model?: monaco.editor.ITextModel | null;
     editorDecorationsCollection:
         | monaco.editor.IEditorDecorationsCollection
         | undefined;
+    monacoInstance?: typeof monaco;
 }) => {
     if (!model) return;
     if (!editorDecorationsCollection) return;
+    if (!monacoInstance) return;
 
     const decorations = [
         {
-            range: new monaco.Range(
+            range: new monacoInstance.Range(
                 error.line,
                 1,
                 error.line,
@@ -30,7 +33,7 @@ export const highlightErrorLine = ({
                 hoverMessage: { value: error.message },
                 overviewRuler: {
                     color: '#ff0000',
-                    position: monaco.editor.OverviewRulerLane.Right,
+                    position: monacoInstance.editor.OverviewRulerLane.Right,
                     darkColor: '#ff0000',
                 },
             },

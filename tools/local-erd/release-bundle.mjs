@@ -30,7 +30,13 @@ const requiredEntries = [
     'LICENSE',
     'NOTICE',
 ];
-const requiredRuntimeTools = ['index.html', 'library.html'];
+const requiredRuntimeTools = [
+    'index.html',
+    'library.html',
+    'stop.mjs',
+    'stop-control.mjs',
+    'open-browser.mjs',
+];
 
 const isRuntimeTool = (name) =>
     /\.(?:html|mjs|js|sql)$/.test(name) && !/\.test\.(?:mjs|js)$/.test(name);

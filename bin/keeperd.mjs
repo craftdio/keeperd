@@ -12,6 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const commands = Object.freeze({
     init: 'tools/local-erd/init.mjs',
     start: 'tools/local-erd/server.mjs',
+    stop: 'tools/local-erd/stop.mjs',
     sync: 'tools/local-erd/sync.mjs',
 });
 
@@ -23,6 +24,7 @@ Usage:
 Commands:
   init    Prepare KeepERD user state and the local app build
   start   Start the local KeepERD server
+  stop    Safely stop the local KeepERD server
   sync    Sync a repository branch into a local ERD
 
 Options:

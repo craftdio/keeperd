@@ -41,6 +41,69 @@ const choose = (id) =>
         })
     );
 
+it('keeps the Sync toolbar below the responsive editor header', async () => {
+    history.replaceState({}, '', '/diagrams/test');
+    const root = document.createElement('div');
+    root.id = 'root';
+    document.body.append(root);
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => response({ snapshots: [], branches: [] }))
+    );
+
+    await import('./sync-ui.js');
+    const toolbar = document.querySelector('#erd-sync');
+    const header = document.createElement('nav');
+    let bottom = 117;
+    vi.spyOn(header, 'getBoundingClientRect').mockImplementation(() => ({
+        bottom,
+    }));
+    root.append(header);
+    await vi.waitFor(() => expect(toolbar.style.top).toBe('127px'));
+
+    bottom = 153;
+    window.dispatchEvent(new Event('resize'));
+    expect(toolbar.style.top).toBe('163px');
+
+    const replacement = document.createElement('nav');
+    vi.spyOn(replacement, 'getBoundingClientRect').mockReturnValue({
+        bottom: 90,
+    });
+    header.replaceWith(replacement);
+    await vi.waitFor(() => expect(toolbar.style.top).toBe('100px'));
+});
+
+it('shows a branch refresh button and bypasses the remote cache without restarting', async () => {
+    let branches = ['main'];
+    const fetch = vi.fn(async (path) =>
+        path.startsWith('/api/branches')
+            ? response({
+                  branches: path.includes('refresh=1') ? branches : ['main'],
+              })
+            : response(
+                  path === '/api/sync' ? { status: 'idle' } : { snapshots: [] }
+              )
+    );
+    vi.stubGlobal('fetch', fetch);
+    await import('./sync-ui.js');
+    choose('');
+    const select = document.querySelector('#erd-branch');
+    const refresh = document.querySelector('#erd-branch-refresh');
+    await vi.waitFor(() => expect(select.value).toBe('main'));
+    expect(refresh).not.toBeNull();
+    branches = ['main', 'feature/new'];
+    refresh.click();
+    await vi.waitFor(() =>
+        expect([...select.options].map((option) => option.value)).toContain(
+            'feature/new'
+        )
+    );
+    expect(select.value).toBe('main');
+    expect(fetch.mock.calls.some(([path]) => path.includes('&refresh=1'))).toBe(
+        true
+    );
+});
+
 it('syncs only committed local inputs and places information beside the source', async () => {
     const fetch = vi.fn(async (url, options) => {
         if (options?.method === 'POST')
@@ -93,7 +156,7 @@ it('syncs only committed local inputs and places information beside the source',
     ).toBeNull();
     expect(document.querySelector('#source-heading #erd-info')).not.toBeNull();
     vi.useFakeTimers();
-    document.querySelector('#erd-sync button').click();
+    document.querySelector('#erd-sync-action').click();
     await vi.advanceTimersByTimeAsync(1000);
     const [url] = fetch.mock.calls.find(
         ([, options]) => options?.method === 'POST'
@@ -266,6 +329,81 @@ it('opens an existing branch directly and syncs a branch that has no saved ERD',
             `/api/sync?branch=main&repository=${encodeURIComponent(repositoryUrl)}`
         ),
         expect.objectContaining({ method: 'POST' })
+    );
+});
+
+it.each([
+    'SCHEMA_METHOD_UNSUPPORTED',
+    'SCHEMA_CONFIGURATION_MISSING',
+    'SCHEMA_CONFIGURATION_AMBIGUOUS',
+    'SCHEMA_VERSION_UNSUPPORTED',
+])('locks Sync after a non-actionable schema result: %s', async (code) => {
+    const guidance =
+        '스키마 실행 설정을 확인하세요. 현재 지원 방식: Atlas 선언 SQL (db/schema/*.sql), debut 순차 SQL (db/migration/*.sql), 설정된 Flyway SQL (src/main/resources/db/migration/{V,R}*.sql), 설정된 Alembic revision (alembic/versions/*.py), 설정된 Airflow 메타 DB (Dockerfile의 고정 버전)';
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(async (path, options) => {
+            if (path.startsWith('/api/branches'))
+                return response({ branches: ['main'] });
+            if (path === '/data/snapshots.json')
+                return response({ snapshots: [] });
+            if (path.startsWith('/api/sync') && options?.method === 'POST')
+                return response({
+                    status: 'error',
+                    code,
+                    progress: 0,
+                    message: guidance,
+                });
+            return response({ status: 'idle' });
+        })
+    );
+    await import('./sync-ui.js');
+    choose('');
+    const sync = document.querySelector('#erd-sync-action');
+    await vi.waitFor(() => expect(sync.disabled).toBe(false));
+    vi.useFakeTimers();
+    sync.click();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sync.disabled).toBe(true);
+    expect(document.querySelector('#erd-input-status').textContent).toBe(
+        guidance
+    );
+    expect(document.querySelector('#erd-sync-panel').textContent).toContain(
+        '현재 지원 방식:'
+    );
+});
+
+it('shows the selected Airflow metadata database and pinned version', async () => {
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(async (path) => {
+            if (path.startsWith('/api/branches'))
+                return response({ branches: ['main'] });
+            if (path === '/data/snapshots.json')
+                return response({
+                    snapshots: [
+                        {
+                            repositoryUrl,
+                            branch: 'main',
+                            schemaSource: {
+                                kind: 'airflow-metadata',
+                                label: 'Airflow 메타 DB',
+                                path: 'Dockerfile · Airflow 3.3.1',
+                                files: 3,
+                            },
+                            diagram: { id: 'debut-main' },
+                        },
+                    ],
+                });
+            return response({ status: 'idle' });
+        })
+    );
+    await import('./sync-ui.js');
+    choose('');
+    await vi.waitFor(() =>
+        expect(document.querySelector('#erd-input-status').textContent).toBe(
+            '스키마 입력 · Airflow 메타 DB · Dockerfile · Airflow 3.3.1 · 3개'
+        )
     );
 });
 

@@ -142,13 +142,17 @@ test('serves the management page without GitHub auth and protects deletion APIs'
         'folder-picker.mjs',
         'library-store.mjs',
         'local-source.mjs',
+        'schema-replay.mjs',
+        'sync-errors.mjs',
         'git-credentials.mjs',
         'memory-cache.mjs',
         'build-state.mjs',
         'cli-command.mjs',
         'state-paths.mjs',
         'state-lock.mjs',
+        'stop-control.mjs',
         'node-command.mjs',
+        'open-browser.mjs',
     ])
         await copyFile(path.join(source, name), path.join(root, name));
     await writeFile(
@@ -187,6 +191,7 @@ test('serves the management page without GitHub auth and protects deletion APIs'
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
             ...process.env,
+            CI: 'true',
             KEEPERD_STATE_DIR: path.join(project, '.local-erd'),
         },
     });

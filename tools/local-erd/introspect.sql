@@ -4,6 +4,7 @@ WITH relations AS (
  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
  WHERE c.relkind IN ('r','p','v','m') AND n.nspname NOT IN ('pg_catalog','information_schema')
  AND n.nspname NOT LIKE 'pg_toast%'
+ AND c.relname NOT IN ('flyway_schema_history','alembic_version')
 )
 SELECT json_build_object(
  'tables', (SELECT coalesce(json_agg(r ORDER BY schema,name),'[]') FROM relations r),

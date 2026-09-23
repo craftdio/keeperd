@@ -4,6 +4,13 @@ import { realpathSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { canonicalRepository, validateBranch } from './branches.mjs';
 import { githubGitEnvironment } from './git-credentials.mjs';
+import {
+    isSchemaInputFile,
+    schemaInputPaths,
+    selectSchemaSource,
+} from './schema-replay.mjs';
+
+export { selectSchemaSource } from './schema-replay.mjs';
 
 export class LocalSourceError extends Error {
     constructor(code, message) {
@@ -16,37 +23,6 @@ const fail = (code, message) => {
 };
 const hash = (value) =>
     createHash('sha256').update(value).digest('hex').slice(0, 24);
-const schemaSourceDefinitions = [
-    {
-        kind: 'atlas-schema',
-        label: 'Atlas 선언 스키마',
-        prefix: 'db/schema/',
-        path: 'db/schema/*.sql',
-    },
-    {
-        kind: 'sql-migrations',
-        label: 'SQL 마이그레이션',
-        prefix: 'db/migration/',
-        path: 'db/migration/*.sql',
-    },
-];
-
-export function selectSchemaSource(input) {
-    const names = [...(input instanceof Map ? input.keys() : input)];
-    for (const definition of schemaSourceDefinitions) {
-        const files = names
-            .filter(
-                (name) =>
-                    name.startsWith(definition.prefix) && name.endsWith('.sql')
-            )
-            .sort();
-        if (files.length) return { ...definition, files };
-    }
-    fail(
-        'SCHEMA_SOURCE_NOT_FOUND',
-        '지원 가능한 SQL 스키마 입력이 없습니다. db/schema/*.sql 또는 db/migration/*.sql을 확인하세요.'
-    );
-}
 const git = (repo, ...args) =>
     execFileSync('git', ['-C', repo, ...args], {
         encoding: 'utf8',
@@ -218,8 +194,7 @@ function branchWorktrees(repo) {
                     '--porcelain=v1',
                     '--untracked-files=all',
                     '--',
-                    'db/migration',
-                    'db/schema'
+                    ...schemaInputPaths
                 ).trim()
             );
         } catch {
@@ -409,14 +384,13 @@ function capture(repo, branch, mode) {
             '-rz',
             sha,
             '--',
-            'db/migration',
-            'db/schema'
+            ...schemaInputPaths
         )
             .split('\0')
             .filter(Boolean);
         for (const entry of entries) {
             const match = /^(\d+) blob ([\da-f]+)\t([\s\S]+)$/.exec(entry);
-            if (!match || !match[3].endsWith('.sql')) continue;
+            if (!match || !isSchemaInputFile(match[3])) continue;
             if (!['100644', '100755'].includes(match[1]))
                 fail(
                     'LOCAL_UNSAFE_PATH',
@@ -433,11 +407,10 @@ function capture(repo, branch, mode) {
             '--others',
             '--exclude-standard',
             '--',
-            'db/migration',
-            'db/schema'
+            ...schemaInputPaths
         )
             .split('\0')
-            .filter((name) => name.endsWith('.sql'));
+            .filter(isSchemaInputFile);
         for (const name of [...new Set(names)].sort()) {
             const absolute = path.resolve(repo.path, name);
             if (!absolute.startsWith(repo.path + path.sep))
@@ -485,7 +458,7 @@ function capture(repo, branch, mode) {
             }
         }
     }
-    const schemaSource = selectSchemaSource(files);
+    const schemaSource = selectSchemaSource(files, repo.repositoryUrl);
     const fingerprint = hash(
         JSON.stringify(
             schemaSource.files.map((name) => [name, files.get(name)])
@@ -515,14 +488,13 @@ export function captureLocalCommit(repo, revision) {
         '-rz',
         sha,
         '--',
-        'db/migration',
-        'db/schema'
+        ...schemaInputPaths
     )
         .split('\0')
         .filter(Boolean);
     for (const entry of entries) {
         const match = /^(\d+) blob ([\da-f]+)\t([\s\S]+)$/.exec(entry);
-        if (!match || !match[3].endsWith('.sql')) continue;
+        if (!match || !isSchemaInputFile(match[3])) continue;
         if (!['100644', '100755'].includes(match[1]))
             fail(
                 'LOCAL_UNSAFE_PATH',
@@ -530,7 +502,11 @@ export function captureLocalCommit(repo, revision) {
             );
         files.set(match[3], git(repo.path, 'cat-file', 'blob', match[2]));
     }
-    return { sha, files, schemaSource: selectSchemaSource(files) };
+    return {
+        sha,
+        files,
+        schemaSource: selectSchemaSource(files, repo.repositoryUrl),
+    };
 }
 
 export function captureLocalSource(repo, branch, mode = 'commit') {

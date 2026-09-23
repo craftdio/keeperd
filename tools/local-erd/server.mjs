@@ -19,6 +19,16 @@ import { stateDirectory } from './state-paths.mjs';
 import { acquireStateLock } from './state-lock.mjs';
 import { nodeCommand } from './node-command.mjs';
 import {
+    openDefaultBrowser,
+    parseStartOptions,
+    startHelp,
+} from './open-browser.mjs';
+import {
+    matchesStopProof,
+    stopProof,
+    validStopNonce,
+} from './stop-control.mjs';
+import {
     diagramKey,
     canonicalRepository,
     listBranches,
@@ -37,6 +47,17 @@ import {
     LocalSourceError,
 } from './local-source.mjs';
 const root = path.dirname(fileURLToPath(import.meta.url));
+let startOptions;
+try {
+    startOptions = parseStartOptions(process.argv.slice(2));
+} catch (error) {
+    console.error(`${error.message}\n${startHelp}`);
+    process.exit(1);
+}
+if (startOptions.help) {
+    console.log(startHelp);
+    process.exit(0);
+}
 const dist = path.resolve(root, '../../dist');
 const state = stateDirectory();
 const port = Number(process.env.LOCAL_ERD_PORT ?? 18777);
@@ -120,6 +141,23 @@ const remoteChecks = new Map();
 let registering = false;
 let pickingFolder = false;
 let deleting = false;
+let stopping = false;
+const stopChallenges = new Map();
+async function ownsServerLock(listeningPort) {
+    try {
+        const record = JSON.parse(
+            await readFile(path.join(state, '.keeperd.lock'), 'utf8')
+        );
+        return (
+            record.command === 'start' &&
+            record.pid === process.pid &&
+            record.port === listeningPort &&
+            record.token === stateLock.token
+        );
+    } catch {
+        return false;
+    }
+}
 const githubCache = createMemoryCache();
 const primaryRepository = (config) =>
     config.repositoryUrl ? canonicalRepository(config.repositoryUrl) : null;
@@ -224,6 +262,114 @@ const server = createServer(async (req, res) => {
                 Location: `http://localhost:${listeningPort}${req.url}`,
                 'Cache-Control': 'no-store',
             }).end();
+            return;
+        }
+        if (url.pathname === '/_keeperd/stop') {
+            if (
+                req.headers.host !== `localhost:${listeningPort}` ||
+                req.headers.origin ||
+                req.headers['sec-fetch-site'] ||
+                !(await ownsServerLock(listeningPort))
+            ) {
+                rejectJson(
+                    res,
+                    403,
+                    'STOP_IDENTITY_MISMATCH',
+                    '종료할 KeepERD 서버를 확인할 수 없습니다.'
+                );
+                return;
+            }
+            const nonce =
+                req.method === 'GET'
+                    ? url.searchParams.get('nonce')
+                    : req.headers['x-keeperd-stop-nonce'];
+            if (!validStopNonce(nonce)) {
+                rejectJson(
+                    res,
+                    400,
+                    'STOP_NONCE_INVALID',
+                    '종료 요청을 확인하세요.'
+                );
+                return;
+            }
+            if (req.method === 'GET') {
+                if (stopChallenges.size >= 32)
+                    stopChallenges.delete(stopChallenges.keys().next().value);
+                stopChallenges.set(nonce, Date.now() + 5000);
+                res.writeHead(200, {
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'no-store',
+                }).end(
+                    JSON.stringify({
+                        pid: process.pid,
+                        proof: stopProof(stateLock.token, 'identify', nonce),
+                    })
+                );
+                return;
+            }
+            if (req.method !== 'POST') {
+                res.writeHead(405).end();
+                return;
+            }
+            const expiresAt = stopChallenges.get(nonce);
+            stopChallenges.delete(nonce);
+            if (
+                !expiresAt ||
+                expiresAt < Date.now() ||
+                !matchesStopProof(
+                    stateLock.token,
+                    'authorize',
+                    nonce,
+                    req.headers['x-keeperd-stop-proof']
+                )
+            ) {
+                rejectJson(
+                    res,
+                    403,
+                    'STOP_NOT_AUTHORIZED',
+                    '종료 요청을 인증할 수 없습니다.'
+                );
+                return;
+            }
+            if (stopping) {
+                rejectJson(
+                    res,
+                    409,
+                    'STOP_IN_PROGRESS',
+                    'KeepERD 서버가 이미 종료 중입니다.'
+                );
+                return;
+            }
+            if (
+                job.status === 'running' ||
+                registering ||
+                deleting ||
+                pickingFolder
+            ) {
+                rejectJson(
+                    res,
+                    409,
+                    'STOP_BUSY',
+                    'Sync 또는 저장소 작업이 진행 중입니다. 완료 후 다시 종료하세요.'
+                );
+                return;
+            }
+            stopping = true;
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-store',
+            }).end(JSON.stringify({ stopping: true, pid: process.pid }), () => {
+                process.kill(process.pid, 'SIGTERM');
+            });
+            return;
+        }
+        if (stopping) {
+            rejectJson(
+                res,
+                503,
+                'SERVER_STOPPING',
+                'KeepERD 서버가 종료 중입니다.'
+            );
             return;
         }
         if (url.pathname.startsWith('/api/')) {
@@ -725,7 +871,7 @@ const server = createServer(async (req, res) => {
                     .toString()
                     .replace(
                         '</body>',
-                        `<script>addEventListener('vite:preloadError',function(event){try{var key='chartdb:chunk-recovery:'+location.pathname;var now=Date.now();var previous=Number(sessionStorage.getItem(key));if(Number.isFinite(previous)&&now-previous<60000)return;event.preventDefault();sessionStorage.setItem(key,String(now));location.reload()}catch(error){console.error(error)}})</script><a href="/" style="position:fixed;bottom:12px;left:12px;z-index:99999;background:#172554;color:white;padding:8px 14px;border-radius:8px;font:13px sans-serif">← 브랜치 목록</a><script type="module" src="/sync-ui.js"></script></body>`
+                        `<script>addEventListener('vite:preloadError',function(event){try{var key='chartdb:chunk-recovery:'+location.pathname;var now=Date.now();var previous=Number(sessionStorage.getItem(key));if(Number.isFinite(previous)&&now-previous<60000)return;event.preventDefault();sessionStorage.setItem(key,String(now));location.reload()}catch(error){console.error(error)}})</script><script type="module" src="/sync-ui.js"></script></body>`
                     )
             );
         res.writeHead(200, {
@@ -743,7 +889,16 @@ const localhostServer = createServer((req, res) =>
 );
 server.listen(port, '127.0.0.1', () => {
     const listeningPort = server.address().port;
-    localhostServer.listen(listeningPort, '::1', () =>
-        console.log(`KeepERD: http://localhost:${listeningPort}`)
-    );
+    stateLock.updatePort(listeningPort);
+    localhostServer.listen(listeningPort, '::1', () => {
+        const url = `http://localhost:${listeningPort}/`;
+        console.log(`KeepERD: ${url}`);
+        if (!startOptions.noOpen)
+            void openDefaultBrowser(url).then((result) => {
+                if (result === 'failed')
+                    console.error(
+                        `기본 브라우저를 자동으로 열지 못했습니다. 직접 여세요: ${url}`
+                    );
+            });
+    });
 });

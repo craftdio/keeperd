@@ -11,7 +11,7 @@ const run = (...args) =>
     spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
 
 test('keeperd resolves every public command to its existing local ERD script', () => {
-    assert.deepEqual(Object.keys(commands), ['init', 'start', 'sync']);
+    assert.deepEqual(Object.keys(commands), ['init', 'start', 'stop', 'sync']);
     for (const [command, script] of Object.entries(commands))
         assert.match(commandScript(command), new RegExp(`${script}$`));
     assert.equal(commandScript('unknown'), undefined);
@@ -23,6 +23,7 @@ test('keeperd prints its top-level help', () => {
     assert.match(result.stdout, /Usage:\n {2}keeperd <command> \[options\]/);
     assert.match(result.stdout, /init\s{2,}Prepare KeepERD/);
     assert.match(result.stdout, /start\s+Start the local KeepERD server/);
+    assert.match(result.stdout, /stop\s+Safely stop the local KeepERD server/);
     assert.match(result.stdout, /sync\s+Sync a repository branch/);
     assert.match(result.stdout, /-v, --version/);
 });
@@ -44,6 +45,18 @@ test('keeperd delegates init help to the existing initializer', () => {
         result.stdout,
         /GitHub 저장소는 화면에서 선택한 뒤 Sync하세요/
     );
+});
+
+test('keeperd delegates stop help without touching user state', () => {
+    const result = run('stop', '--help');
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /keeperd stop/);
+});
+
+test('keeperd delegates start help without launching the server', () => {
+    const result = run('start', '--help');
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /keeperd start \[--no-open\]/);
 });
 
 test('keeperd rejects an unknown command without launching a script', () => {
