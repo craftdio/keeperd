@@ -50,3 +50,37 @@ jobs:
       - name: Verify KeepERD release checksum
         working-directory: release
         run: sha256sum --check keeperd-v*.tar.gz.sha256
+
+      - name: Smoke-test and inspect extracted KeepERD release
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '\n' < KEEPERD_VERSION)"
+          ARCHIVE="release/keeperd-v${VERSION}.tar.gz"
+          EXTRACT_DIR="$(mktemp -d)"
+          trap 'rm -rf "${EXTRACT_DIR}"' EXIT
+
+          CONTENTS="$(tar -tzf "${ARCHIVE}")"
+          for REQUIRED in \
+            bin/keeperd.mjs \
+            dist/index.html \
+            tools/local-erd/server.mjs \
+            tools/local-erd/stop.mjs \
+            tools/local-erd/stop-control.mjs \
+            tools/local-erd/open-browser.mjs \
+            package.json \
+            package-lock.json \
+            KEEPERD_VERSION \
+            LICENSE \
+            NOTICE
+          do
+            grep -Fxq "keeperd-v${VERSION}/${REQUIRED}" <<< "${CONTENTS}"
+          done
+          if grep -E '/(node_modules|\.git|\.local-erd)(/|$)|\.test\.(mjs|js)$' <<< "${CONTENTS}"; then
+            echo 'Release archive contains a forbidden path.' >&2
+            exit 1
+          fi
+
+          tar -xzf "${ARCHIVE}" -C "${EXTRACT_DIR}"
+          BUNDLE="${EXTRACT_DIR}/keeperd-v${VERSION}"
+          test "$(node "${BUNDLE}/bin/keeperd.mjs" --version)" = "KeepERD ${VERSION}"
+          node "${BUNDLE}/bin/keeperd.mjs" --help | grep -Fq 'keeperd <command> [options]'
