@@ -121,7 +121,7 @@ it('cancels without mutation and deletes only selected IDs after confirmation', 
     expect(JSON.parse(post[1].body)).toEqual({ ids: ['debut-main'] });
     expect(element('cards').children).toHaveLength(3);
 });
-it('keeps browser data on server failure and disables deletion when browser DB is unavailable', async () => {
+it('keeps working data on server failure and disables deletion when the workspace is unavailable', async () => {
     await load();
     let finishPost;
     fetch.mockImplementation((_, options) =>
@@ -155,7 +155,7 @@ it('keeps browser data on server failure and disables deletion when browser DB i
     element('refresh').click();
     await vi.waitFor(() =>
         expect(element('status').textContent).toContain(
-            '브라우저 DB를 읽지 못해'
+            '작업 데이터 저장소를 읽지 못해'
         )
     );
     expect(element('delete').disabled).toBe(true);
@@ -176,7 +176,7 @@ it('restores case-insensitive filters from the main page link', async () => {
     expect(element('cards').children).toHaveLength(2);
 });
 
-it('keeps browser-only leftovers manageable after partial failure and retries without deleting the server twice', async () => {
+it('keeps workspace-only leftovers manageable after partial failure and retries without deleting the schema twice', async () => {
     await load();
     let deleted = false;
     fetch.mockImplementation(async (_, options) => {
@@ -201,7 +201,7 @@ it('keeps browser-only leftovers manageable after partial failure and retries wi
     confirmDelete();
     await vi.waitFor(() =>
         expect(element('status').textContent).toContain(
-            '서버 삭제 후 브라우저 정리에 실패'
+            '작업 데이터 정리에 실패'
         )
     );
     const leftover = [...element('cards').children].find(
@@ -209,7 +209,7 @@ it('keeps browser-only leftovers manageable after partial failure and retries wi
             card.textContent.includes('org/backend') &&
             card.textContent.includes('main')
     );
-    expect(leftover.textContent).toContain('이 브라우저의 작업 데이터');
+    expect(leftover.textContent).toContain('서버의 작업 데이터');
     expect(leftover.textContent).not.toContain('Sync 결과 스키마 파일');
     storage.list.mockResolvedValue([
         { id: 'manual', name: 'My diagram', bytes: 200 },

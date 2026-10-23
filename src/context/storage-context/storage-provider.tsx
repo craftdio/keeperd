@@ -1,3 +1,4 @@
+import { ServerStorageProvider } from './server-storage-provider';
 import React, { useCallback, useMemo } from 'react';
 import { coalescedSave } from '@/lib/coalesced-save';
 import type { StorageContext } from './storage-context';
@@ -15,17 +16,22 @@ import type { DiagramFilter } from '@/lib/domain/diagram-filter/diagram-filter';
 import type { Note } from '@/lib/domain/note';
 import { mergeBranchDiagram } from '@/lib/local-branch-merge';
 import {
+    migrateLocalErdBackups,
+    type LocalErdBackup,
+} from '@/lib/local-erd-backups';
+import {
     applyRepositoryLayout,
     captureRepositoryLayout,
     repositoryKey,
     type RepositoryLayout,
 } from '@/lib/repository-layout';
 
-export const StorageProvider: React.FC<React.PropsWithChildren> = ({
+export const BrowserStorageProvider: React.FC<React.PropsWithChildren> = ({
     children,
 }) => {
     const db = useMemo(() => {
         const dexieDB = new Dexie('ChartDB') as Dexie & {
+            local_erd_backups: EntityTable<LocalErdBackup, 'key'>;
             repository_layouts: EntityTable<RepositoryLayout, 'id'>;
             saveRepositoryLayout: (diagramId: string) => Promise<void>;
             diagrams: EntityTable<
@@ -250,6 +256,7 @@ export const StorageProvider: React.FC<React.PropsWithChildren> = ({
 
         type LocalDB = typeof dexieDB;
         dexieDB.version(14).stores({ repository_layouts: 'id' });
+        dexieDB.version(15).stores({ local_erd_backups: 'key, diagramId' });
         const repositoryIds = new Map<string, string>();
         const readLayoutDiagram = async (
             diagramId: string,
@@ -303,6 +310,10 @@ export const StorageProvider: React.FC<React.PropsWithChildren> = ({
         dexieDB.on('ready', async (readyDB) => {
             const dexieDB = readyDB as LocalDB;
             if (import.meta.env.VITE_LOCAL_ERD === 'true') {
+                await migrateLocalErdBackups(
+                    dexieDB.local_erd_backups,
+                    localStorage
+                );
                 const response = await fetch('/data/snapshots.json', {
                     cache: 'no-store',
                 });
@@ -344,9 +355,11 @@ export const StorageProvider: React.FC<React.PropsWithChildren> = ({
                     if (stored?.version === 2) continue;
                     let diagram = await readLayoutDiagram(saved.id, dexieDB);
                     // Recover a coherent table/Area snapshot, never union independent layouts.
-                    const backup = localStorage.getItem(
-                        `debut-repo-layout-migration:${saved.id}`
-                    );
+                    const backup = (
+                        await dexieDB.local_erd_backups.get(
+                            `debut-repo-layout-migration:${saved.id}`
+                        )
+                    )?.value;
                     if (stored && backup) {
                         try {
                             const original = JSON.parse(backup) as Diagram;
@@ -364,10 +377,11 @@ export const StorageProvider: React.FC<React.PropsWithChildren> = ({
                     }
                     if (diagram) {
                         if (!backup)
-                            localStorage.setItem(
-                                `debut-repo-layout-migration:${saved.id}`,
-                                JSON.stringify(diagram)
-                            );
+                            await dexieDB.local_erd_backups.put({
+                                key: `debut-repo-layout-migration:${saved.id}`,
+                                diagramId: saved.id,
+                                value: JSON.stringify(diagram),
+                            });
                         seeded.set(
                             repo,
                             captureRepositoryLayout(repo, diagram)
@@ -380,7 +394,8 @@ export const StorageProvider: React.FC<React.PropsWithChildren> = ({
                     const importRevision = `v2:${snapshot.revision}`;
                     const revisionKey = `debut-erd-revision:${incoming.id}`;
                     if (
-                        localStorage.getItem(revisionKey) === importRevision &&
+                        (await dexieDB.local_erd_backups.get(revisionKey))
+                            ?.value === importRevision &&
                         (await dexieDB.diagrams.get(incoming.id))
                     )
                         continue;
@@ -409,10 +424,11 @@ export const StorageProvider: React.FC<React.PropsWithChildren> = ({
                           }
                         : undefined;
                     if (previous)
-                        localStorage.setItem(
-                            `debut-erd-backup:${incoming.id}`,
-                            JSON.stringify(previous)
-                        );
+                        await dexieDB.local_erd_backups.put({
+                            key: `debut-erd-backup:${incoming.id}`,
+                            diagramId: incoming.id,
+                            value: JSON.stringify(previous),
+                        });
                     const merged = mergeBranchDiagram(incoming, previous);
                     await dexieDB.transaction(
                         'rw',
@@ -459,7 +475,11 @@ export const StorageProvider: React.FC<React.PropsWithChildren> = ({
                                 );
                         }
                     );
-                    localStorage.setItem(revisionKey, importRevision);
+                    await dexieDB.local_erd_backups.put({
+                        key: revisionKey,
+                        diagramId: incoming.id,
+                        value: importRevision,
+                    });
                 }
                 const activeId = decodeURIComponent(
                     window.location.pathname.replace(/^\/diagrams\//, '')
@@ -470,10 +490,11 @@ export const StorageProvider: React.FC<React.PropsWithChildren> = ({
                     const layout =
                         await dexieDB.repository_layouts.get(activeRepo);
                     if (diagram && layout) {
-                        localStorage.setItem(
-                            `debut-repo-layout-backup:${activeId}`,
-                            JSON.stringify(diagram)
-                        );
+                        await dexieDB.local_erd_backups.put({
+                            key: `debut-repo-layout-backup:${activeId}`,
+                            diagramId: activeId,
+                            value: JSON.stringify(diagram),
+                        });
                         const shared = applyRepositoryLayout(diagram, layout);
                         await dexieDB.transaction(
                             'rw',
@@ -1219,3 +1240,10 @@ export const StorageProvider: React.FC<React.PropsWithChildren> = ({
         </storageContext.Provider>
     );
 };
+
+export const StorageProvider: React.FC<React.PropsWithChildren> = (props) =>
+    import.meta.env.VITE_LOCAL_ERD === 'true' ? (
+        <ServerStorageProvider {...props} />
+    ) : (
+        <BrowserStorageProvider {...props} />
+    );

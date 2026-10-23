@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createReleaseBundle } from './release-bundle.mjs';
 
 const sourceRoot = path.resolve(
@@ -38,6 +38,20 @@ function fixture(version = '0.1.0') {
     write('dist/index.html', '<!doctype html>');
     write('dist/old.js', 'old bundle');
     write('dist/.keeperd-build.json', '{"sourceRevision":"source"}\n');
+    write(
+        'tools/local-erd/node-runtime.mjs',
+        readFileSync(
+            path.join(sourceRoot, 'tools/local-erd/node-runtime.mjs'),
+            'utf8'
+        )
+    );
+    write(
+        'tools/local-erd/workspace-store.mjs',
+        readFileSync(
+            path.join(sourceRoot, 'tools/local-erd/workspace-store.mjs'),
+            'utf8'
+        )
+    );
     write('tools/local-erd/server.mjs', 'runtime server');
     write('tools/local-erd/stop.mjs', 'runtime stop client');
     write('tools/local-erd/stop-control.mjs', 'runtime stop proof');
@@ -61,6 +75,20 @@ function fixture(version = '0.1.0') {
     );
     write('tools/local-erd/server.test.mjs', 'test only');
     write('tools/local-erd/schema-diff.test.js', 'test only');
+    write(
+        'src/lib/local-branch-merge.ts',
+        readFileSync(
+            path.join(sourceRoot, 'src/lib/local-branch-merge.ts'),
+            'utf8'
+        )
+    );
+    write(
+        'src/lib/repository-layout.ts',
+        readFileSync(
+            path.join(sourceRoot, 'src/lib/repository-layout.ts'),
+            'utf8'
+        )
+    );
     write('package.json', '{}\n');
     write('package-lock.json', '{}\n');
     write('KEEPERD_VERSION', `${version}\n`);
@@ -137,6 +165,18 @@ test('creates a portable runtime archive with a source-controlled version and ch
             false
         );
         assert.equal(existsSync(path.join(bundle, 'node_modules')), false);
+        const probe = spawnSync(
+            process.execPath,
+            [
+                '--input-type=module',
+                '-e',
+                `import {openWorkspace} from ${JSON.stringify(pathToFileURL(path.join(bundle, 'tools/local-erd/workspace-store.mjs')).href)}; const store=openWorkspace(process.argv[1]); console.log(store.db.prepare('SELECT sqlite_version() AS version').get().version); store.close();`,
+                path.join(extract, 'state'),
+            ],
+            { encoding: 'utf8' }
+        );
+        assert.equal(probe.status, 0, probe.stderr);
+        assert.equal(probe.stdout.trim(), '3.54.0');
     } finally {
         rmSync(root, { force: true, recursive: true });
         rmSync(extract, { force: true, recursive: true });

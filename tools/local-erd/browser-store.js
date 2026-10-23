@@ -1,3 +1,8 @@
+import {
+    readWorkspace,
+    writeWorkspace,
+    workspaceNotice,
+} from './workspace-client.js';
 const relatedStores = [
     'db_tables',
     'db_relationships',
@@ -6,12 +11,8 @@ const relatedStores = [
     'db_custom_types',
     'notes',
     'diagram_filters',
+    'local_erd_backups',
 ];
-const request = (r) =>
-    new Promise((resolve, reject) => {
-        r.onsuccess = () => resolve(r.result);
-        r.onerror = () => reject(r.error);
-    });
 const complete = (tx) =>
     new Promise((resolve, reject) => {
         tx.oncomplete = resolve;
@@ -38,93 +39,85 @@ async function open() {
     });
 }
 export async function browserDiagrams() {
-    const db = await open();
-    if (!db) return [];
-    try {
-        if (!db.objectStoreNames.contains('diagrams')) return [];
-        const names = [
-            'diagrams',
-            ...relatedStores.filter((s) => db.objectStoreNames.contains(s)),
-        ];
-        const tx = db.transaction(names, 'readonly');
-        const done = complete(tx);
-        const values = await Promise.all([
-            ...names.map((s) => request(tx.objectStore(s).getAll())),
-            done,
-        ]);
-        return values[0].map((diagram) => {
-            const full = { ...diagram };
-            names.slice(1).forEach((name, i) => {
-                full[name] = values[i + 1].filter(
-                    (row) => row.diagramId === diagram.id
-                );
-            });
-            return {
-                id: diagram.id,
-                name: diagram.name,
-                updatedAt: diagram.updatedAt,
-                tables: full.db_tables?.length ?? 0,
-                bytes: new Blob([JSON.stringify(full)]).size,
-            };
-        });
-    } finally {
-        db.close();
-    }
+    const state = await readWorkspace({ refresh: true });
+    return state.diagrams.map((diagram) => ({
+        id: diagram.id,
+        name: diagram.name,
+        updatedAt: diagram.updatedAt,
+        tables: diagram.tables?.length ?? 0,
+        bytes: new Blob([JSON.stringify(diagram)]).size,
+        backupBytes: state.backups
+            .filter((item) => item.diagramId === diagram.id)
+            .reduce((size, item) => size + item.bytes, 0),
+    }));
 }
 export async function deleteBrowserDiagrams(ids) {
     if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || !id))
         throw new Error('삭제할 ERD ID를 확인하세요.');
+    await readWorkspace({ refresh: true });
+    for (const id of ids) await writeWorkspace('deleteDiagram', { id });
     const selected = new Set(ids);
-    const db = await open();
-    if (db) {
-        try {
-            const names = ['diagrams', 'config', ...relatedStores].filter((s) =>
-                db.objectStoreNames.contains(s)
-            );
-            if (names.length) {
-                const tx = db.transaction(names, 'readwrite');
-                const done = complete(tx);
-                const operations = names.map(
-                    (name) =>
-                        new Promise((resolve, reject) => {
-                            const store = tx.objectStore(name);
-                            const r = store.openCursor();
-                            r.onerror = () => reject(r.error);
-                            r.onsuccess = () => {
-                                const cursor = r.result;
-                                if (!cursor) return resolve();
-                                const row = cursor.value;
-                                if (name === 'config') {
-                                    if (selected.has(row.defaultDiagramId)) {
-                                        delete row.defaultDiagramId;
-                                        cursor.update(row);
-                                    }
-                                } else if (
-                                    selected.has(
-                                        name === 'diagrams'
-                                            ? row.id
-                                            : row.diagramId
-                                    )
-                                )
-                                    cursor.delete();
-                                cursor.continue();
-                            };
-                        })
+    let db;
+    try {
+        db = await open();
+        if (db) {
+            try {
+                const names = ['diagrams', 'config', ...relatedStores].filter(
+                    (s) => db.objectStoreNames.contains(s)
                 );
-                await Promise.all([...operations, done]);
+                if (names.length) {
+                    const tx = db.transaction(names, 'readwrite');
+                    const done = complete(tx);
+                    const operations = names.map(
+                        (name) =>
+                            new Promise((resolve, reject) => {
+                                const store = tx.objectStore(name);
+                                const r = store.openCursor();
+                                r.onerror = () => reject(r.error);
+                                r.onsuccess = () => {
+                                    const cursor = r.result;
+                                    if (!cursor) return resolve();
+                                    const row = cursor.value;
+                                    if (name === 'config') {
+                                        if (
+                                            selected.has(row.defaultDiagramId)
+                                        ) {
+                                            delete row.defaultDiagramId;
+                                            cursor.update(row);
+                                        }
+                                    } else if (
+                                        selected.has(
+                                            name === 'diagrams'
+                                                ? row.id
+                                                : row.diagramId
+                                        )
+                                    )
+                                        cursor.delete();
+                                    cursor.continue();
+                                };
+                            })
+                    );
+                    await Promise.all([...operations, done]);
+                }
+            } finally {
+                db.close();
             }
-        } finally {
-            db.close();
         }
+        for (const id of ids)
+            for (const prefix of [
+                'debut-erd-revision:',
+                'debut-erd-backup:',
+                'debut-repo-layout-migration:',
+                'debut-repo-layout-backup:',
+                'debut-layout-backup:',
+                'local-erd-source:',
+            ])
+                localStorage.removeItem(`${prefix}${id}`);
+    } catch {
+        workspaceNotice(
+            '서버 작업 데이터는 삭제됐지만 이전 브라우저 원본 정리를 완료하지 못했습니다.'
+        );
     }
-    for (const id of ids)
-        for (const prefix of [
-            'debut-erd-revision:',
-            'debut-erd-backup:',
-            'debut-layout-backup:',
-            'local-erd-source:',
-        ])
-            localStorage.removeItem(`${prefix}${id}`);
     const channel =
         typeof BroadcastChannel === 'function'
             ? new BroadcastChannel('local-erd-library')

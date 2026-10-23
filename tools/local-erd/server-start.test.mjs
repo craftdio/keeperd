@@ -24,6 +24,13 @@ function fixture(t) {
     const state = path.join(project, 'state');
     const log = path.join(project, 'open.log');
     mkdirSync(tools, { recursive: true });
+    mkdirSync(path.join(project, 'src/lib'), { recursive: true });
+    for (const name of ['local-branch-merge.ts', 'repository-layout.ts'])
+        copyFileSync(
+            new URL('../../src/lib/' + name, import.meta.url),
+            path.join(project, 'src/lib', name)
+        );
+
     mkdirSync(path.join(project, 'dist'), { recursive: true });
     mkdirSync(path.join(state, 'data'), { recursive: true });
     for (const name of readdirSync(source))

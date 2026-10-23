@@ -138,7 +138,7 @@ function render(updateStatus = true) {
             const tags = document.createElement('div');
             for (const text of [
                 item.server ? 'Sync 결과 스키마 파일' : null,
-                item.browser ? '이 브라우저의 작업 데이터' : null,
+                item.browser ? '서버의 작업 데이터' : null,
                 item.source?.kind === 'local'
                     ? `로컬 ${item.source.mode === 'worktree' ? '작업 중' : '커밋'}`
                     : null,
@@ -153,7 +153,7 @@ function render(updateStatus = true) {
             }
             const meta = document.createElement('p');
             meta.className = 'meta';
-            meta.textContent = `${item.tables ?? 0} tables · Sync 결과 ${formatBytes(item.serverBytes)} · 브라우저 작업 약 ${formatBytes(item.browserBytes)}${item.revision ? ` · ${item.revision.slice(0, 12)}` : ''}`;
+            meta.textContent = `${item.tables ?? 0} tables · Sync 결과 ${formatBytes(item.serverBytes)} · 서버 작업 약 ${formatBytes(item.browserBytes)}${item.revision ? ` · ${item.revision.slice(0, 12)}` : ''}`;
             const links = document.createElement('div');
             links.className = 'card-links';
             const open = document.createElement('a');
@@ -205,7 +205,7 @@ async function load() {
         } catch {
             browserAvailable = false;
             setStatus(
-                '브라우저 DB를 읽지 못해 서버 목록만 표시합니다. 삭제는 비활성화했습니다. 다른 탭을 닫고 다시 시도하세요.'
+                '작업 데이터 저장소를 읽지 못해 스키마 목록만 표시합니다. 서버 상태를 확인하세요.'
             );
         }
         const map = new Map(
@@ -248,6 +248,7 @@ async function load() {
                 ...map.get(i.id),
                 browser: true,
                 browserBytes: i.bytes,
+                backupBytes: i.backupBytes,
                 serverBytes: map.get(i.id)?.serverBytes ?? 0,
             });
         }
@@ -275,19 +276,11 @@ async function load() {
         const serverBytes = items.reduce((n, i) => n + i.serverBytes, 0),
             browserBytes = items.reduce((n, i) => n + i.browserBytes, 0),
             backupBytes = items.reduce(
-                (size, item) =>
-                    size +
-                    new Blob([
-                        localStorage.getItem(`debut-erd-backup:${item.id}`) ??
-                            '',
-                        localStorage.getItem(
-                            `debut-layout-backup:${item.id}`
-                        ) ?? '',
-                    ]).size,
+                (size, item) => size + (item.backupBytes ?? 0),
                 0
             );
         element('usage').textContent =
-            `전체 Sync 결과 파일 ${formatBytes(serverBytes)} · 이 브라우저의 작업 데이터 약 ${formatBytes(browserBytes)} · 자동 백업 ${formatBytes(backupBytes)}`;
+            `전체 Sync 결과 파일 ${formatBytes(serverBytes)} · 서버 작업 데이터 약 ${formatBytes(browserBytes)} · 자동 백업 ${formatBytes(backupBytes)}`;
     } catch (error) {
         setStatus(error.message, 'error');
         browserAvailable = false;
@@ -381,12 +374,12 @@ dialogConfirm.onclick = async () => {
                 throw new Error(result.error ?? '서버 삭제에 실패했습니다.');
             cleanupPending = result.cleanupPending;
         }
-        setStatus('이 브라우저의 ERD 작업 데이터를 삭제하는 중…');
+        setStatus('서버의 ERD 작업 데이터를 삭제하는 중…');
         try {
             await deleteBrowserDiagrams(ids);
         } catch {
             throw new Error(
-                '서버 삭제 후 브라우저 정리에 실패했습니다. 새로고침 후 남은 ERD를 다시 삭제하세요.'
+                '작업 데이터 정리에 실패했습니다. 새로고침 후 남은 ERD를 다시 삭제하세요.'
             );
         }
         selected.clear();

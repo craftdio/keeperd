@@ -1,3 +1,16 @@
+import { sqliteWorkspaceFixture } from '../../src/test/sqlite-workspace-fixture.js';
+import { readLegacyWorkspace } from './browser-migration.js';
+let fixture;
+vi.mock('./workspace-client.js', () => ({
+    readWorkspace: async () => fixture.store.view(),
+    writeWorkspace: async (action, params) =>
+        fixture.store.mutate({
+            action,
+            params: JSON.parse(JSON.stringify(params)),
+            revision: fixture.store.view().revision,
+        }),
+    workspaceBackup: async (id) => fixture.store.readBackup(id),
+}));
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import {
@@ -24,10 +37,12 @@ const request = (value) =>
     });
 
 beforeEach(() => {
+    fixture = sqliteWorkspaceFixture();
     vi.stubGlobal('indexedDB', new IDBFactory());
     localStorage.removeItem('debut-layout-backup:target');
 });
 afterEach(() => {
+    fixture.close();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
 });
@@ -50,7 +65,13 @@ async function seed() {
         'readwrite'
     );
     for (const id of ['source', 'target'])
-        tx.objectStore('diagrams').put({ id, name: id, updatedAt: new Date() });
+        tx.objectStore('diagrams').put({
+            id,
+            name: id,
+            databaseType: 'postgresql',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        });
     tx.objectStore('areas').put({
         id: 'source-area',
         diagramId: 'source',
@@ -135,15 +156,26 @@ async function seed() {
         tx.onabort = () => reject(tx.error);
     });
     db.close();
+    fixture.store.migrate(
+        JSON.parse(JSON.stringify(await readLegacyWorkspace()))
+    );
+    fixture.store.db
+        .prepare('UPDATE diagrams SET repository=? WHERE id=?')
+        .run('https://github.com/example/backend', 'target');
 }
 
 async function rows(name) {
-    const db = await request(indexedDB.open('ChartDB'));
-    const values = await request(
-        db.transaction(name, 'readonly').objectStore(name).getAll()
+    const state = fixture.store.view();
+    if (name === 'repository_layouts') return state.layouts;
+    const collection = { db_tables: 'tables', areas: 'areas', notes: 'notes' }[
+        name
+    ];
+    return state.diagrams.flatMap((diagram) =>
+        (diagram[collection] ?? []).map((row) => ({
+            ...row,
+            diagramId: diagram.id,
+        }))
     );
-    db.close();
-    return values;
 }
 
 it('exports and applies repository layout data without replacing schema IDs', async () => {
@@ -171,7 +203,7 @@ it('exports and applies repository layout data without replacing schema IDs', as
         areas: 1,
         notes: 1,
     });
-    expect(hasLayoutBackup('target')).toBe(true);
+    expect(await hasLayoutBackup('target')).toBe(true);
     const tables = await rows('db_tables');
     const target = tables.find((table) => table.id === 'target-users');
     expect(target).toEqual(
@@ -186,7 +218,7 @@ it('exports and applies repository layout data without replacing schema IDs', as
     expect(target.parentAreaId).not.toBe('source-area');
     expect(
         tables.find((table) => table.id === 'target-extra').parentAreaId
-    ).toBeNull();
+    ).toBeUndefined();
     expect(
         (await rows('areas')).filter((area) => area.diagramId === 'source')
     ).toHaveLength(1);
@@ -199,14 +231,7 @@ it('exports and applies repository layout data without replacing schema IDs', as
     expect((await rows('repository_layouts'))[0]).toEqual(
         expect.objectContaining({
             id: 'https://github.com/example/backend',
-            tables: {
-                '["public","users"]': expect.objectContaining({
-                    x: 100,
-                    color: '#123456',
-                    parentAreaId: 'area-1',
-                }),
-            },
-            areas: [expect.objectContaining({ id: 'area-1', name: 'Users' })],
+            areas: [expect.objectContaining({ name: 'Users' })],
         })
     );
     const repositoryExport = await exportLayoutPackage('target', source);
@@ -215,19 +240,19 @@ it('exports and applies repository layout data without replacing schema IDs', as
             format: 'keeperd-repository-layout',
             repository: { url: source.repositoryUrl },
             layout: expect.objectContaining({
-                tables: [
+                tables: expect.arrayContaining([
                     expect.objectContaining({
                         name: 'users',
                         x: 100,
                         color: '#123456',
                     }),
-                ],
+                ]),
             }),
         })
     );
 
     await restoreLayoutBackup('target', source);
-    expect(hasLayoutBackup('target')).toBe(false);
+    expect(await hasLayoutBackup('target')).toBe(true);
     expect(
         (await rows('db_tables')).find((table) => table.id === 'target-users')
     ).toEqual(expect.objectContaining({ x: 900, color: '#ffffff' }));
@@ -293,46 +318,34 @@ it('accepts every branch of the same repository and rejects other repositories',
     ).toThrow('Area 연결');
 });
 
-it('reports blocked browser storage while reading, writing and removing backups', async () => {
+it('exports, applies and restores with browser storage blocked, while backup failure remains optional', async () => {
     await seed();
     const layout = await exportLayoutPackage('source', source);
-    const storage = globalThis.localStorage;
     vi.stubGlobal('localStorage', {
-        getItem: () => {
+        getItem() {
             throw new Error('blocked');
         },
-        setItem: storage.setItem.bind(storage),
-        removeItem: storage.removeItem.bind(storage),
-    });
-    expect(hasLayoutBackup('target')).toBe(false);
-    await expect(restoreLayoutBackup('target', source)).rejects.toThrow(
-        '백업을 읽지 못했습니다'
-    );
-    vi.stubGlobal('localStorage', storage);
-
-    vi.stubGlobal('localStorage', {
-        getItem: storage.getItem.bind(storage),
-        setItem: () => {
-            throw new Error('blocked');
+        setItem() {
+            throw new Error('full');
         },
-        removeItem: storage.removeItem.bind(storage),
-    });
-    await expect(applyLayoutPackage('target', source, layout)).rejects.toThrow(
-        '백업을 저장하지 못했습니다'
-    );
-    vi.stubGlobal('localStorage', storage);
-
-    localStorage.setItem('debut-layout-backup:target', JSON.stringify(layout));
-    vi.stubGlobal('localStorage', {
-        getItem: storage.getItem.bind(storage),
-        setItem: storage.setItem.bind(storage),
-        removeItem: () => {
+        removeItem() {
             throw new Error('blocked');
         },
     });
-    await expect(restoreLayoutBackup('target', source)).rejects.toThrow(
-        '백업을 정리하지 못했습니다'
+    vi.stubGlobal('indexedDB', undefined);
+    await expect(applyLayoutPackage('target', source, layout)).resolves.toEqual(
+        expect.objectContaining({ matchedTables: 1 })
     );
+    await expect(restoreLayoutBackup('target', source)).resolves.toEqual(
+        expect.objectContaining({ matchedTables: 2 })
+    );
+    fixture.store.db.exec(
+        "CREATE TRIGGER no_backup BEFORE INSERT ON backups BEGIN SELECT RAISE(FAIL,'full'); END"
+    );
+    await expect(applyLayoutPackage('target', source, layout)).resolves.toEqual(
+        expect.objectContaining({ matchedTables: 1 })
+    );
+    expect(fixture.store.view().warning).toContain('자동 백업');
 });
 
 it('derives a portable source identity from remote and local snapshots', () => {

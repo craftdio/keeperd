@@ -5,9 +5,9 @@ export function nodeCommand(execPath = process.execPath) {
         accessSync(execPath, constants.X_OK);
         return execPath;
     } catch {
-        // A long-running server can outlive a Homebrew Node upgrade. In that
-        // case process.execPath still names the removed Cellar binary, while
-        // the stable `node` link on PATH points at the newly installed version.
-        return 'node';
+        // Never switch a running server to an unverified Node from PATH.
+        throw new Error(
+            '실행 중인 Node 런타임이 제거됐습니다. Node 26.12.1을 확인한 뒤 KeepERD를 다시 시작하세요.'
+        );
     }
 }

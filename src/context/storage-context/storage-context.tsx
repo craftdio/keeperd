@@ -24,6 +24,7 @@ export interface StorageContext {
     deleteDiagramFilter: (diagramId: string) => Promise<void>;
 
     // Diagram operations
+    replaceDiagram?: (params: { diagram: Diagram }) => Promise<void>;
     addDiagram: (params: { diagram: Diagram }) => Promise<void>;
     listDiagrams: (options?: {
         includeTables?: boolean;
