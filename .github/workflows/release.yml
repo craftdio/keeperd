@@ -30,10 +30,10 @@ jobs:
                   fetch-depth: 0
                   persist-credentials: false
 
-            - name: Use Node.js 24.x
+            - name: Use the pinned Node.js runtime
               uses: actions/setup-node@v4
               with:
-                  node-version: 24.x
+                  node-version-file: .nvmrc
 
             - name: Require main for manual dry run
               if: github.event_name == 'workflow_dispatch'
