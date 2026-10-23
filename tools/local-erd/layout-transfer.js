@@ -1,3 +1,8 @@
+import {
+    readWorkspace,
+    writeWorkspace,
+    workspaceBackup,
+} from './workspace-client.js';
 const FORMAT = 'keeperd-repository-layout';
 const VERSION = 1;
 const BACKUP_PREFIX = 'debut-layout-backup:';
@@ -12,41 +17,6 @@ const canonicalRepository = (url) =>
 const tableKey = (table) => `${table.schema ?? ''}\u0000${table.name}`;
 const finite = (value) => typeof value === 'number' && Number.isFinite(value);
 const nullableFinite = (value) => value === null || finite(value);
-const request = (value) =>
-    new Promise((resolve, reject) => {
-        value.onsuccess = () => resolve(value.result);
-        value.onerror = () => reject(value.error);
-    });
-const complete = (tx) =>
-    new Promise((resolve, reject) => {
-        tx.oncomplete = resolve;
-        tx.onabort = () =>
-            reject(tx.error ?? new Error('브라우저 DB 작업이 취소됐습니다.'));
-        tx.onerror = () => {};
-    });
-
-async function open() {
-    if (!globalThis.indexedDB)
-        throw new Error('이 브라우저에서 IndexedDB에 접근할 수 없습니다.');
-    return new Promise((resolve, reject) => {
-        const result = indexedDB.open('ChartDB');
-        let absent = false;
-        result.onupgradeneeded = (event) => {
-            if (event.oldVersion === 0) {
-                absent = true;
-                result.transaction.abort();
-            }
-        };
-        result.onsuccess = () => resolve(result.result);
-        result.onerror = () =>
-            absent
-                ? reject(new Error('먼저 ERD를 열어 작업 데이터를 생성하세요.'))
-                : reject(result.error);
-        result.onblocked = () =>
-            reject(new Error('다른 ChartDB 탭을 닫고 다시 시도하세요.'));
-    });
-}
-
 function sourceOf(snapshot, primaryUrl = '') {
     const revision = snapshot?.revision ?? '';
     return {
@@ -204,28 +174,6 @@ export function checkLayoutCompatibility(input, targetSource) {
     };
 }
 
-async function readDiagramRows(db, diagramId) {
-    const required = ['diagrams', 'db_tables', 'areas', 'notes'];
-    if (required.some((name) => !db.objectStoreNames.contains(name)))
-        throw new Error('ChartDB 작업 데이터 저장소를 찾을 수 없습니다.');
-    const tx = db.transaction(required, 'readonly');
-    const done = complete(tx);
-    const [diagram, tables, areas, notes] = await Promise.all([
-        request(tx.objectStore('diagrams').get(diagramId)),
-        request(tx.objectStore('db_tables').getAll()),
-        request(tx.objectStore('areas').getAll()),
-        request(tx.objectStore('notes').getAll()),
-    ]);
-    await done;
-    if (!diagram) throw new Error('현재 ERD 작업 데이터를 찾을 수 없습니다.');
-    return {
-        diagram,
-        tables: tables.filter((row) => row.diagramId === diagramId),
-        areas: areas.filter((row) => row.diagramId === diagramId),
-        notes: notes.filter((row) => row.diagramId === diagramId),
-    };
-}
-
 function createPackage(source, rows) {
     validateSource(source);
     const areaKeys = new Map(
@@ -332,49 +280,21 @@ function createRepositoryPackage(source, stored) {
     });
 }
 
-function repositoryLayout(source, layout) {
-    return {
-        version: 2,
-        id: canonicalRepository(source.repositoryUrl),
-        tables: Object.fromEntries(
-            layout.tables.map((table) => [
-                JSON.stringify([table.schema ?? '', table.name]),
-                {
-                    x: table.x,
-                    y: table.y,
-                    color: table.color,
-                    width: table.width,
-                    expanded: table.expanded,
-                    order: table.order,
-                    parentAreaId: table.parentAreaKey ?? undefined,
-                },
-            ])
-        ),
-        areas: layout.areas.map(({ key, ...area }) => ({ ...area, id: key })),
-        notes: layout.notes.map((note, index) => ({
-            ...note,
-            id: `note-${index + 1}`,
-        })),
-    };
-}
-
 export async function exportLayoutPackage(diagramId, source) {
-    const db = await open();
-    try {
-        if (db.objectStoreNames.contains('repository_layouts')) {
-            const tx = db.transaction('repository_layouts', 'readonly');
-            const stored = await request(
-                tx
-                    .objectStore('repository_layouts')
-                    .get(canonicalRepository(source.repositoryUrl))
-            );
-            if (stored?.version === 2)
-                return createRepositoryPackage(source, stored);
-        }
-        return createPackage(source, await readDiagramRows(db, diagramId));
-    } finally {
-        db.close();
-    }
+    const state = await readWorkspace({ refresh: true });
+    const diagram = state.diagrams.find((item) => item.id === diagramId);
+    if (!diagram) throw new Error('현재 ERD 작업 데이터를 찾을 수 없습니다.');
+    const stored = state.layouts.find(
+        (item) => item.id === canonicalRepository(source.repositoryUrl)
+    );
+    return stored?.version === 2
+        ? createRepositoryPackage(source, stored)
+        : createPackage(source, {
+              diagram,
+              tables: diagram.tables ?? [],
+              areas: diagram.areas ?? [],
+              notes: diagram.notes ?? [],
+          });
 }
 
 const id = (prefix) =>
@@ -390,139 +310,105 @@ export async function applyLayoutPackage(
     const compatibility = checkLayoutCompatibility(layoutPackage, targetSource);
     if (!compatibility.compatible)
         throw new Error('현재 ERD와 레포가 다릅니다.');
-    const db = await open();
-    try {
-        const current = await readDiagramRows(db, diagramId);
-        if (createBackup) {
-            try {
-                localStorage.setItem(
-                    `${BACKUP_PREFIX}${diagramId}`,
-                    JSON.stringify(createPackage(targetSource, current))
-                );
-            } catch {
-                throw new Error(
-                    '브라우저 저장소에 기존 작업 데이터 백업을 저장하지 못했습니다.'
-                );
-            }
-        }
-        const importedTables = new Map(
-            layoutPackage.layout.tables.map((table) => [tableKey(table), table])
-        );
-        const areaIds = new Map(
-            layoutPackage.layout.areas.map((area) => [
-                area.key,
-                id('layout-area'),
-            ])
-        );
-        let matched = 0;
-        const tables = current.tables.map((table) => {
-            const imported = importedTables.get(tableKey(table));
-            if (!imported) return { ...table, parentAreaId: null };
-            matched++;
-            return {
-                ...table,
-                x: imported.x,
-                y: imported.y,
-                color: imported.color,
-                width: imported.width,
-                expanded: imported.expanded,
-                order: imported.order,
-                parentAreaId: imported.parentAreaKey
-                    ? (areaIds.get(imported.parentAreaKey) ?? null)
-                    : null,
-            };
-        });
-        const areas = layoutPackage.layout.areas.map((area) => ({
-            id: areaIds.get(area.key),
-            diagramId,
-            name: area.name,
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: area.height,
-            color: area.color,
-            ...(finite(area.order) ? { order: area.order } : {}),
-        }));
-        const notes = layoutPackage.layout.notes.map((note) => {
-            const { order, ...attributes } = note;
-            return {
-                id: id('layout-note'),
-                diagramId,
-                ...attributes,
-                ...(finite(order) ? { order } : {}),
-            };
-        });
-        if (!db.objectStoreNames.contains('repository_layouts'))
-            throw new Error('레포 공통 작업 데이터 저장소를 찾을 수 없습니다.');
-        const tx = db.transaction(
-            ['diagrams', 'db_tables', 'areas', 'notes', 'repository_layouts'],
-            'readwrite'
-        );
-        const done = complete(tx);
-        const operations = [
-            request(
-                tx.objectStore('diagrams').put({
-                    ...current.diagram,
-                    updatedAt: new Date(),
-                })
-            ),
-            ...tables.map((table) =>
-                request(tx.objectStore('db_tables').put(table))
-            ),
-            ...current.areas.map((area) =>
-                request(tx.objectStore('areas').delete(area.id))
-            ),
-            ...areas.map((area) => request(tx.objectStore('areas').put(area))),
-            ...current.notes.map((note) =>
-                request(tx.objectStore('notes').delete(note.id))
-            ),
-            ...notes.map((note) => request(tx.objectStore('notes').put(note))),
-            request(
-                tx
-                    .objectStore('repository_layouts')
-                    .put(repositoryLayout(targetSource, layoutPackage.layout))
-            ),
-        ];
-        await Promise.all([...operations, done]);
+    const state = await readWorkspace({ refresh: true });
+    const diagram = state.diagrams.find((item) => item.id === diagramId);
+    if (!diagram) throw new Error('현재 ERD 작업 데이터를 찾을 수 없습니다.');
+    const current = {
+        diagram,
+        tables: diagram.tables ?? [],
+        areas: diagram.areas ?? [],
+        notes: diagram.notes ?? [],
+    };
+    const importedTables = new Map(
+        layoutPackage.layout.tables.map((table) => [tableKey(table), table])
+    );
+    const areaIds = new Map(
+        layoutPackage.layout.areas.map((area) => [area.key, id('layout-area')])
+    );
+    let matched = 0;
+    const tables = current.tables.map((table) => {
+        const imported = importedTables.get(tableKey(table));
+        if (!imported) return { ...table, parentAreaId: null };
+        matched++;
         return {
-            matchedTables: matched,
-            skippedTables: layoutPackage.layout.tables.length - matched,
-            areas: areas.length,
-            notes: notes.length,
+            ...table,
+            x: imported.x,
+            y: imported.y,
+            color: imported.color,
+            width: imported.width,
+            expanded: imported.expanded,
+            order: imported.order,
+            parentAreaId: imported.parentAreaKey
+                ? (areaIds.get(imported.parentAreaKey) ?? null)
+                : null,
         };
-    } finally {
-        db.close();
-    }
+    });
+    const areas = layoutPackage.layout.areas.map((area) => ({
+        id: areaIds.get(area.key),
+        diagramId,
+        name: area.name,
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: area.height,
+        color: area.color,
+        ...(finite(area.order) ? { order: area.order } : {}),
+    }));
+    const notes = layoutPackage.layout.notes.map((note) => {
+        const { order, ...attributes } = note;
+        return {
+            id: id('layout-note'),
+            diagramId,
+            ...attributes,
+            ...(finite(order) ? { order } : {}),
+        };
+    });
+    await writeWorkspace('replaceDiagram', {
+        id: diagramId,
+        diagram: { ...diagram, tables, areas, notes, updatedAt: new Date() },
+        kind: createBackup ? 'layout' : 'layout-restore',
+    });
+    return {
+        matchedTables: matched,
+        skippedTables: layoutPackage.layout.tables.length - matched,
+        areas: areas.length,
+        notes: notes.length,
+    };
 }
 
-export function hasLayoutBackup(diagramId) {
-    try {
-        return Boolean(localStorage.getItem(`${BACKUP_PREFIX}${diagramId}`));
-    } catch {
-        return false;
-    }
+export async function hasLayoutBackup(diagramId) {
+    const state = await readWorkspace();
+    return state.backups.some(
+        (item) =>
+            item.diagramId === diagramId &&
+            (item.kind === 'layout' ||
+                item.kind === `${BACKUP_PREFIX}${diagramId}`)
+    );
 }
 
 export async function restoreLayoutBackup(diagramId, targetSource) {
-    const key = `${BACKUP_PREFIX}${diagramId}`;
-    let backup;
-    try {
-        backup = localStorage.getItem(key);
-    } catch {
-        throw new Error(
-            '브라우저 저장소에서 작업 데이터 백업을 읽지 못했습니다.'
-        );
-    }
+    const state = await readWorkspace({ refresh: true });
+    const backup = state.backups.find(
+        (item) =>
+            item.diagramId === diagramId &&
+            (item.kind === 'layout' ||
+                item.kind === `${BACKUP_PREFIX}${diagramId}`)
+    );
     if (!backup) throw new Error('되돌릴 작업 데이터 백업이 없습니다.');
-    const result = await applyLayoutPackage(diagramId, targetSource, backup, {
-        createBackup: false,
-    });
-    try {
-        localStorage.removeItem(key);
-    } catch {
-        throw new Error(
-            '작업 데이터는 복원했지만 브라우저의 백업을 정리하지 못했습니다.'
-        );
-    }
-    return result;
+    const value = await workspaceBackup(backup.id);
+    if (value.format === FORMAT)
+        return applyLayoutPackage(diagramId, targetSource, value, {
+            createBackup: false,
+        });
+    return applyLayoutPackage(
+        diagramId,
+        targetSource,
+        createPackage(targetSource, {
+            diagram: value,
+            tables: value.tables ?? [],
+            areas: value.areas ?? [],
+            notes: value.notes ?? [],
+        }),
+        { createBackup: false }
+    );
 }

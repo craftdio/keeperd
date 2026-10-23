@@ -23,7 +23,8 @@ worktree의 커밋·작업 중 변경도 별도 입력으로 확인할 수 있�
   `db/migration/*.sql`을 순서대로 재현
 - branch의 공통 조상과 비교해 추가·변경된 테이블과 필드를 ERD에서 표시
 - 같은 repository의 테이블 배치·크기·색상, Area, 메모를 branch 간에 보존
-- 브라우저의 작업 배치를 JSON으로 내보내거나 같은 repository의 다른 브라우저에 적용
+- 서버 SQLite에 ERD 작업을 저장해 같은 서버의 브라우저·프로필 사이에 공유
+- 기존 브라우저 데이터를 자동 이전하고 다른 컴퓨터에는 작업 데이터 JSON으로 공유
 
 Sync한 스키마와 개인 설정은 로컬에 저장되며 GitHub로 자동 업로드하지 않습니다.
 
@@ -32,7 +33,7 @@ Sync한 스키마와 개인 설정은 로컬에 저장되며 GitHub로 자동 �
 ### Homebrew로 설치
 
 일반 사용자는 [공개 Homebrew tap](https://github.com/craftdio/homebrew-keeperd)을
-통한 설치를 권장합니다. Formula가 Node, Git, GitHub CLI(`gh`)를 함께 설치합니다.
+통한 설치를 권장합니다. Formula가 정확한 Node **26.12.1**을 KeepERD 전용 디렉터리에 설치하고 Git, GitHub CLI(`gh`)도 준비합니다. 시스템 Node는 교체하지 않습니다.
 스키마 재현 기능을 사용하려면 Formula에 포함되지 않는 Docker Desktop 또는 Docker
 호환 런타임을 별도로 설치하고 실행해야 합니다.
 
@@ -57,12 +58,13 @@ gh auth setup-git
 
 ### 소스 checkout에서 실행
 
-개발, 기여, 수동 소스 기반 실행에는 source checkout을 사용하세요. Node.js 22
-이상, Git, Docker가 필요합니다.
+개발, 기여, 수동 소스 기반 실행에는 source checkout을 사용하세요. Node.js **26.12.1**, Git, Docker가 필요합니다.
 
 ```sh
 git clone https://github.com/craftdio/keeperd.git
 cd keeperd
+nvm install
+nvm use
 npm run local:init
 npm run local:start
 ```
@@ -78,9 +80,11 @@ repository를 사용할 때만 `gh` 로그인하면 됩니다.
 - **로컬 입력**: 화면에서 서버 컴퓨터의 clone/worktree 절대 경로를 등록합니다.
   push하지 않은 commit을 읽을 수 있으며, 현재 checkout에서는 staged·unstaged·
   미추적 스키마 SQL을 포함해 확인할 수 있습니다.
-- **ERD 작업 데이터**: 위치·색상·Area·메모는 현재 브라우저 IndexedDB에
-  저장됩니다. 다른 브라우저나 컴퓨터로 옮길 때는 ERD 화면의 **작업 데이터 공유**
-  JSON을 사용하세요.
+- **ERD 작업 데이터**: ERD·배치·색상·Area·메모·필터는 사용자 상태 폴더의
+  `keeperd.sqlite`에 저장됩니다. 기존 각 브라우저의 첫 접속에서 데이터를 자동
+  이전하며, 같은 ERD는 저장 시각이 최신인 전체 저장본을 선택합니다. 원본과
+  제한된 복구 백업은 보존합니다. [이전·복구 가이드](tools/local-erd/SQLITE.md)를
+  확인하세요. 다른 컴퓨터에는 **작업 데이터 공유** JSON을 사용하세요.
 
 원격·로컬 입력의 차이, 스키마 파일 경로, Sync 실패 시 기존 ERD 보존 방식 등은
 [KeepERD 기능 가이드](tools/local-erd/README.md)에서 확인할 수 있습니다.

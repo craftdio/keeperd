@@ -30,10 +30,10 @@ jobs:
                   fetch-depth: 0
                   persist-credentials: false
 
-            - name: Use Node.js 24.x
+            - name: Use the pinned Node.js runtime
               uses: actions/setup-node@v4
               with:
-                  node-version: 24.x
+                  node-version-file: .nvmrc
 
             - name: Require main for manual dry run
               if: github.event_name == 'workflow_dispatch'
@@ -68,6 +68,7 @@ jobs:
                   fi
                   VERSION="${VERSION}" node --input-type=module -e \
                     "import { assertKeeperdVersion } from './tools/local-erd/keeperd-version.mjs'; assertKeeperdVersion(process.env.VERSION);"
+                  test -s "release-notes/${VERSION}.md"
                   echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
             - name: Verify tagged commit belongs to main
@@ -131,6 +132,7 @@ jobs:
                   VERSION_OUTPUT="$(node "${BUNDLE}/bin/keeperd.mjs" --version)"
                   test "${VERSION_OUTPUT}" = "KeepERD ${VERSION}"
                   node "${BUNDLE}/bin/keeperd.mjs" --help | grep -F 'keeperd <command> [options]'
+                  node tools/ci/workspace-smoke.mjs "${BUNDLE}"
 
             - name: Check release archive contents
               env:
@@ -143,6 +145,12 @@ jobs:
                     bin/keeperd.mjs \
                     dist/index.html \
                     tools/local-erd/server.mjs \
+                    tools/local-erd/node-runtime.mjs \
+                    tools/local-erd/workspace-store.mjs \
+                    tools/local-erd/workspace-client.js \
+                    tools/local-erd/browser-migration.js \
+                    src/lib/local-branch-merge.ts \
+                    src/lib/repository-layout.ts \
                     package.json \
                     package-lock.json \
                     KEEPERD_VERSION \
@@ -179,6 +187,11 @@ jobs:
             VERSION: ${{ needs.validate.outputs.version }}
 
         steps:
+            - name: Checkout release notes
+              uses: actions/checkout@v4
+              with:
+                  persist-credentials: false
+
             - name: Reject an existing release
               uses: actions/github-script@v7
               with:
@@ -225,4 +238,4 @@ jobs:
                     --repo "${GITHUB_REPOSITORY}" \
                     --verify-tag \
                     --title "KeepERD ${VERSION}" \
-                    --notes "KeepERD ${VERSION}"
+                    --notes-file "release-notes/${VERSION}.md"

@@ -5,6 +5,7 @@ import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { assertNodeRuntime } from '../tools/local-erd/node-runtime.mjs';
 import { readKeeperdVersion } from '../tools/local-erd/keeperd-version.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -73,6 +74,7 @@ export async function main(args = process.argv.slice(2)) {
         return 1;
     }
     try {
+        assertNodeRuntime();
         const { code, signal } = await run(script, commandArgs);
         if (signal) {
             console.error(`keeperd ${command} stopped by ${signal}.`);

@@ -1,3 +1,5 @@
+import { assertNodeRuntime } from './node-runtime.mjs';
+assertNodeRuntime();
 import { createServer } from 'node:http';
 import {
     readFile,
@@ -18,6 +20,11 @@ import { localCommand } from './cli-command.mjs';
 import { stateDirectory } from './state-paths.mjs';
 import { acquireStateLock } from './state-lock.mjs';
 import { nodeCommand } from './node-command.mjs';
+import {
+    openWorkspace,
+    readSnapshots,
+    WorkspaceError,
+} from './workspace-store.mjs';
 import {
     openDefaultBrowser,
     parseStartOptions,
@@ -61,6 +68,9 @@ if (startOptions.help) {
 const dist = path.resolve(root, '../../dist');
 const state = stateDirectory();
 const port = Number(process.env.LOCAL_ERD_PORT ?? 18777);
+let workspace;
+const getWorkspace = () => (workspace ??= openWorkspace(state));
+process.once('exit', () => workspace?.close());
 const rejectJson = (res, status, code, error) =>
     res
         .writeHead(status, {
@@ -402,6 +412,7 @@ const server = createServer(async (req, res) => {
                     '/api/local/branches',
                     '/api/local/check',
                     '/api/library',
+                    '/api/workspace',
                 ].includes(url.pathname)
             ) {
                 res.writeHead(404).end();
@@ -575,6 +586,102 @@ const server = createServer(async (req, res) => {
                 }
                 return;
             }
+            if (url.pathname === '/api/workspace') {
+                try {
+                    const store = getWorkspace();
+                    let importWarning;
+                    try {
+                        const snapshots = readSnapshots(state);
+                        store.syncSnapshots({
+                            ...snapshots,
+                            snapshots: snapshots.snapshots.map((item) => ({
+                                ...item,
+                                repositoryUrl:
+                                    item.repositoryUrl ??
+                                    primaryRepository(config),
+                            })),
+                        });
+                    } catch (error) {
+                        if (
+                            req.method !== 'GET' ||
+                            !store.view().diagrams.length
+                        )
+                            throw error;
+                        importWarning =
+                            '새 스키마를 저장하지 못해 기존에 저장된 ERD를 표시합니다. 저장 공간과 파일 권한을 확인하세요.';
+                    }
+                    let payload;
+                    if (req.method === 'GET') {
+                        const backupId = url.searchParams.get('backup');
+                        payload = backupId
+                            ? { value: store.readBackup(Number(backupId)) }
+                            : store.view();
+                        if (importWarning) payload.warning = importWarning;
+                    } else if (req.method === 'POST') {
+                        if (req.headers['x-local-erd'] !== 'sync') {
+                            rejectJson(
+                                res,
+                                403,
+                                'LOCAL_REQUEST_FORBIDDEN',
+                                '저장 요청을 확인하세요.'
+                            );
+                            return;
+                        }
+                        const chunks = [];
+                        let bytes = 0;
+                        for await (const chunk of req) {
+                            bytes += chunk.length;
+                            if (bytes > 64 * 1024 * 1024) {
+                                rejectJson(
+                                    res,
+                                    413,
+                                    'REQUEST_TOO_LARGE',
+                                    '한 번에 저장할 작업 데이터가 너무 큽니다.'
+                                );
+                                return;
+                            }
+                            chunks.push(chunk);
+                        }
+                        let input;
+                        try {
+                            input = JSON.parse(
+                                Buffer.concat(chunks).toString('utf8')
+                            );
+                        } catch {
+                            throw new WorkspaceError(
+                                'INVALID_JSON',
+                                '저장 요청 JSON을 확인하세요.'
+                            );
+                        }
+                        if (!input || typeof input !== 'object')
+                            throw new WorkspaceError(
+                                'INVALID_JSON',
+                                '저장 요청을 확인하세요.'
+                            );
+                        payload =
+                            input.action === 'migrate'
+                                ? store.migrate(input.params)
+                                : store.mutate(input);
+                    } else {
+                        res.writeHead(405).end();
+                        return;
+                    }
+                    res.writeHead(200, {
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'no-store',
+                    }).end(JSON.stringify(payload));
+                } catch (error) {
+                    rejectJson(
+                        res,
+                        error instanceof WorkspaceError ? error.status : 500,
+                        error.code ?? 'WORKSPACE_FAILED',
+                        error instanceof WorkspaceError
+                            ? error.message
+                            : '작업 데이터 저장소에 접근하지 못했습니다. 저장 공간과 파일 권한을 확인하세요.'
+                    );
+                }
+                return;
+            }
             if (url.pathname === '/api/library') {
                 try {
                     let payload;
@@ -616,6 +723,7 @@ const server = createServer(async (req, res) => {
                                     Buffer.concat(chunks).toString('utf8')
                                 ).ids
                             );
+                            getWorkspace().removeMany(payload.deleted);
                         } finally {
                             deleting = false;
                         }
@@ -827,6 +935,8 @@ const server = createServer(async (req, res) => {
                 '/repository-switcher.js',
                 '/library.js',
                 '/browser-store.js',
+                '/workspace-client.js',
+                '/browser-migration.js',
                 '/layout-transfer.js',
             ].includes(url.pathname)
         ) {
@@ -843,11 +953,15 @@ const server = createServer(async (req, res) => {
             }).end(await readFile(path.join(root, 'library.html')));
             return;
         }
-        const base = url.pathname.startsWith('/data/') ? state : dist;
+        const dataRequest = url.pathname.startsWith('/data/');
+        const base = dataRequest ? path.join(state, 'data') : dist;
+        const relativePath = dataRequest
+            ? url.pathname.slice('/data'.length)
+            : url.pathname;
         let file =
             url.pathname === '/'
                 ? path.join(root, 'index.html')
-                : path.resolve(base, '.' + decodeURIComponent(url.pathname));
+                : path.resolve(base, '.' + decodeURIComponent(relativePath));
         if (
             !file.startsWith(base + path.sep) &&
             file !== path.join(root, 'index.html')
@@ -858,7 +972,7 @@ const server = createServer(async (req, res) => {
         try {
             if (!(await stat(file)).isFile()) throw new Error();
         } catch {
-            if (base === state) {
+            if (dataRequest) {
                 res.writeHead(404).end();
                 return;
             }

@@ -19,7 +19,7 @@
 
 ### 1. 준비물과 인증
 
-일반 사용자는 [공개 Homebrew tap](https://github.com/craftdio/homebrew-keeperd)을 통한 설치를 권장합니다. Homebrew Formula가 Node, Git, GitHub CLI (`gh`)를 설치합니다. 소스 checkout으로 실행할 때는 Node.js 22 이상과 Git이 필요합니다. 스키마 재현에는 별도로 실행 중인 Docker가 필요합니다.
+일반 사용자는 [공개 Homebrew tap](https://github.com/craftdio/homebrew-keeperd)을 통한 설치를 권장합니다. Homebrew Formula가 정확한 Node **26.12.1**을 KeepERD 전용 디렉터리에 설치하고 Git, GitHub CLI (`gh`)도 준비합니다. 시스템 Node를 교체하지 않습니다. 소스 checkout으로 실행할 때도 정확한 Node **26.12.1**과 Git이 필요합니다. 스키마 재현에는 별도로 실행 중인 Docker가 필요합니다.
 대상 저장소는 PostgreSQL 17에서 실행 가능한 `db/schema/*.sql` 또는 `db/migration/*.sql`을 포함해야 합니다. 둘 다 있으면 Atlas의 최종 목표 상태인 `db/schema`를 우선 사용하고 migration은 실행하지 않습니다. 등록된 `NangmanAzit/myhouse-agent-backend`와 `NangmanAzit/nangmanazit-data-batch`는 `src/main/resources/db/migration/{V,R}*.sql`을 공식 Flyway 11.7.2 컨테이너로 실행합니다. `NangmanAzit/myhouse-backend`는 `alembic/versions/*.py`를 고정 Python 3.14·Alembic 1.18.4 runner로 실행합니다. `NangmanAzit/nangmanazit-data-airflow`는 세 버전 파일에 고정된 Airflow 3.3.1/Python 3.12 공식 이미지로 **Airflow 메타 DB**만 초기화합니다. DAG·Collector·Batch와 업무 DB는 실행하거나 읽지 않습니다.
 Docker Desktop을 사용한다면 먼저 앱을 실행하세요.
 
@@ -47,6 +47,8 @@ keeperd init
 ```sh
 git clone https://github.com/craftdio/keeperd.git
 cd keeperd
+nvm install
+nvm use
 npm run local:init
 ```
 
@@ -86,11 +88,11 @@ keeperd start
 
 다음부터 Homebrew 설치본에서는 `keeperd start`만 실행하면 됩니다. 소스 checkout에서는 `npm run local:start`를 사용하며, 코드가 바뀌었을 때만 로컬 화면을 다시 빌드합니다. 스키마 최신화는 Docker를 켜고 **레포 → 브랜치 → Sync**를 누르세요.
 
-다른 브라우저·프로필·컴퓨터로 배치와 색상을 옮기려면 ERD 화면의 **작업 데이터 공유**를 사용하세요. 보내는 쪽에서 JSON을 내보낸 뒤 받는 쪽에서 같은 레포·브랜치·커밋의 ERD를 Sync하고 파일을 적용합니다. 스키마는 바뀌지 않으며 테이블 배치·크기·색상, Area, 메모만 옮겨집니다. 적용 전 상태는 자동 백업되어 한 번 되돌릴 수 있습니다.
+같은 서버의 다른 브라우저·프로필은 SQLite 작업 데이터를 함께 읽습니다. 각 기존 브라우저·원래 주소에서 처음 접속하면 기존 데이터가 자동 이전됩니다. 다른 컴퓨터로 배치와 색상을 옮기려면 ERD 화면의 **작업 데이터 공유**를 사용하세요. 보내는 쪽에서 JSON을 내보낸 뒤 받는 쪽에서 같은 레포·브랜치·커밋의 ERD를 Sync하고 파일을 적용합니다. 스키마는 바뀌지 않으며 테이블 배치·크기·색상, Area, 메모만 옮겨집니다. 적용 전 상태는 자동 백업되어 한 번 되돌릴 수 있습니다.
 
-포트를 지정하려면 `LOCAL_ERD_PORT=18777 keeperd start`로 실행하세요(소스 checkout은 `npm run local:start`). 실제 바인딩된 포트의 주소가 열리고 터미널에도 표시됩니다. 포트·호스트명이 바뀌면 브라우저 배치 저장 공간도 달라지므로 기존 배치는 JSON으로 내보내 가져오세요.
+포트를 지정하려면 `LOCAL_ERD_PORT=18777 keeperd start`로 실행하세요(소스 checkout은 `npm run local:start`). 실제 바인딩된 포트의 주소가 열리고 터미널에도 표시됩니다. 이미 이전한 작업은 같은 사용자 상태 폴더의 SQLite를 공유합니다. 이전 버전 데이터는 원래 브라우저·프로필·주소에 한 번 접속해야 가져올 수 있으므로 업데이트 시 기존 포트를 유지하세요.
 
-서버 터미널에서는 `Ctrl+C`로 종료합니다. 다른 터미널에서는 패키지 설치본이면 `keeperd stop`, 소스 checkout이면 `npm run local:stop`을 실행하세요. 이 명령은 **현재 사용자 데이터 폴더**의 잠금과 실제 서버의 응답을 함께 확인한 뒤 해당 서버만 정상 종료합니다. `KEEPERD_STATE_DIR`로 별도 상태 폴더를 지정했다면 `start`와 `stop`에 같은 값을 지정하세요. Sync나 저장소 작업 중에는 종료를 거부하므로 완료 후 다시 실행해야 합니다. 오래된 잠금, 다른 프로세스가 사용 중인 포트, 정체가 확인되지 않는 예전 서버에는 신호를 보내거나 강제 종료하지 않습니다. 종료 후 같은 포트에서 다시 시작하면 설정·스냅샷이 유지됩니다. 브라우저 배치는 같은 브라우저·주소에 저장됩니다. 자세한 저장·백업 설명은 [커스텀 기능 사용법](README.md)을 확인하세요.
+서버 터미널에서는 `Ctrl+C`로 종료합니다. 다른 터미널에서는 패키지 설치본이면 `keeperd stop`, 소스 checkout이면 `npm run local:stop`을 실행하세요. 이 명령은 **현재 사용자 데이터 폴더**의 잠금과 실제 서버의 응답을 함께 확인한 뒤 해당 서버만 정상 종료합니다. `KEEPERD_STATE_DIR`로 별도 상태 폴더를 지정했다면 `start`와 `stop`에 같은 값을 지정하세요. Sync나 저장소 작업 중에는 종료를 거부하므로 완료 후 다시 실행해야 합니다. 오래된 잠금, 다른 프로세스가 사용 중인 포트, 정체가 확인되지 않는 예전 서버에는 신호를 보내거나 강제 종료하지 않습니다. 종료 후 같은 포트에서 다시 시작하면 설정·스냅샷이 유지됩니다. ERD 편집 데이터는 사용자 상태 폴더의 `keeperd.sqlite`에 저장됩니다. 자세한 저장·백업 설명은 [커스텀 기능 사용법](README.md)을 확인하세요.
 
 같은 전역 데이터 폴더를 사용하는 `local:start`, `local:sync`, 마이그레이션은 동시에 실행할 수 없습니다. 이미 서버가 실행 중이면 기존 주소를 안내하므로 그 서버를 사용하거나 먼저 종료하세요.
 
@@ -109,11 +111,14 @@ npm run local:migrate -- --from=/Users/you/code/keeperd/.local-erd
 Homebrew 설치본은 JSON 백업 후 서버를 종료하고 다음처럼 업데이트하세요.
 
 ```sh
+keeperd stop
 brew update
-brew upgrade keeperd
+brew upgrade craftdio/keeperd/keeperd
+keeperd --version
+keeperd start
 ```
 
-기존 스키마·배치는 유지합니다.
+기존 스키마·배치는 유지합니다. 업데이트 후 원래 주소로 접속하면 브라우저 데이터를 자동 이전합니다. 최신 저장본 선택·백업 한도·실패 시 재시도는 [SQLite 저장소 가이드](SQLITE.md)를 확인하세요.
 
 #### 소스 checkout 업데이트
 
@@ -142,7 +147,9 @@ keeperd-vX.Y.Z.tar.gz
 keeperd-vX.Y.Z.tar.gz.sha256
 ```
 
-archive는 사전 빌드된 `dist/`, KeepERD 런타임 스크립트, CLI, `KEEPERD_VERSION`, 라이선스·출처 고지와 선택적 재빌드용 npm manifest만 포함합니다. `node_modules`나 테스트 파일은 넣지 않습니다. archive 안의 build marker는 Git checkout이 없는 Homebrew 설치 경로에서도 포함된 화면을 현재 build로 인식하도록 설정됩니다.
+archive에는 Node 실행 파일이 없습니다. Homebrew Formula는 정확한 **26.12.1** 런타임을 별도 resource로 설치하며, 수동 설치 시에도 이 버전이 필요합니다.
+
+archive는 두 개의 공유 타입 제거 가능 TypeScript 알고리즘, 사전 빌드된 `dist/`, KeepERD 런타임 스크립트, CLI, `KEEPERD_VERSION`, 라이선스·출처 고지와 선택적 재빌드용 npm manifest만 포함합니다. `node_modules`나 테스트 파일은 넣지 않습니다. archive 안의 build marker는 Git checkout이 없는 Homebrew 설치 경로에서도 포함된 화면을 현재 build로 인식하도록 설정됩니다.
 
 Release asset을 받은 뒤에도 SHA256과 CLI를 직접 점검할 수 있습니다.
 

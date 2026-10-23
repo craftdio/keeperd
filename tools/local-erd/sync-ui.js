@@ -347,8 +347,13 @@ function downloadLayout(layoutPackage) {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function refreshLayoutRestore() {
-    layoutRestore.hidden = !hasLayoutBackup(currentDiagramId());
+async function refreshLayoutRestore() {
+    try {
+        layoutRestore.hidden = !(await hasLayoutBackup(currentDiagramId()));
+    } catch (error) {
+        layoutRestore.hidden = true;
+        setLayoutStatus(error.message);
+    }
 }
 if (layoutButton) {
     layoutButton.onclick = () => {

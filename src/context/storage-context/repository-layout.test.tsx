@@ -3,14 +3,133 @@ import { render, cleanup } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import Dexie from 'dexie';
-import { StorageProvider } from './storage-provider';
+import { BrowserStorageProvider as StorageProvider } from './storage-provider';
 import { storageContext, type StorageContext } from './storage-context';
 
 afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     history.replaceState({}, '', '/');
+});
+
+it('upgrades v14 and syncs existing ERDs when localStorage is full, preserving backups and layout', async () => {
+    Dexie.dependencies.indexedDB = new IDBFactory();
+    Dexie.dependencies.IDBKeyRange = IDBKeyRange;
+    vi.stubEnv('VITE_LOCAL_ERD', 'true');
+    localStorage.clear();
+    const id = 'debut-develop';
+    const snapshots = [
+        {
+            repositoryUrl: 'https://github.com/example/backend.git',
+            revision: '1',
+            diagram: {
+                id,
+                name: 'develop',
+                databaseType: 'postgresql',
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                tables: [
+                    {
+                        id: 'users',
+                        name: 'users',
+                        schema: 'public',
+                        x: 0,
+                        y: 0,
+                        color: 'red',
+                        fields: [],
+                        indexes: [],
+                    },
+                ],
+                relationships: [],
+                areas: [],
+                notes: [],
+            },
+        },
+    ];
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => ({ snapshots }) }))
+    );
+    let api: StorageContext;
+    function Probe() {
+        api = useContext(storageContext);
+        return null;
+    }
+    const mount = () =>
+        render(
+            <StorageProvider>
+                <Probe />
+            </StorageProvider>
+        );
+    // Start from the installed v14 database, with its existing table data and
+    // localStorage revision, so the test exercises the real upgrade path.
+    const legacyDB = new Dexie('ChartDB');
+    legacyDB.version(14).stores({
+        diagrams: '++id',
+        db_tables: '++id, diagramId',
+        db_relationships: '++id, diagramId',
+        db_dependencies: '++id, diagramId',
+        areas: '++id, diagramId',
+        notes: '++id, diagramId',
+        db_custom_types: '++id, diagramId',
+        diagram_filters: 'diagramId',
+        config: '++id',
+        repository_layouts: 'id',
+    });
+    await legacyDB.table('diagrams').put({
+        id,
+        name: 'develop',
+        databaseType: 'postgresql',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    });
+    await legacyDB
+        .table('db_tables')
+        .put({ ...snapshots[0].diagram.tables[0], diagramId: id });
+    legacyDB.close();
+    localStorage.setItem(`debut-erd-revision:${id}`, 'v2:1');
+    history.replaceState({}, '', `/diagrams/${id}`);
+    mount();
+    await api!.getConfig();
+    await api!.updateTable({
+        id: 'users',
+        attributes: { x: 123, color: 'green' },
+    });
+    cleanup();
+    const legacyKey = 'debut-repo-layout-migration:legacy-diagram';
+    localStorage.setItem(legacyKey, 'legacy backup');
+    localStorage.setItem('unrelated-setting', 'keep');
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+        throw new DOMException('Storage quota exceeded', 'QuotaExceededError');
+    });
+    snapshots[0].revision = '2';
+    mount();
+    await api!.getConfig();
+    expect(await api!.listTables(id)).toMatchObject([
+        { id: 'users', x: 123, color: 'green' },
+    ]);
+    const db = new Dexie('ChartDB');
+    await db.open();
+    expect(db.verno).toBe(15);
+    const backups = db.table('local_erd_backups');
+    expect((await backups.get(legacyKey)).value).toBe('legacy backup');
+    expect(localStorage.getItem(legacyKey)).toBeNull();
+    expect(localStorage.getItem('unrelated-setting')).toBe('keep');
+    expect(
+        JSON.parse((await backups.get(`debut-erd-backup:${id}`)).value)
+            .tables[0]
+    ).toMatchObject({ x: 123, color: 'green' });
+    expect((await backups.get(`debut-erd-revision:${id}`)).value).toBe('v2:2');
+    // Reloads must recognize the imported revision without replacing its backup.
+    const backup = await backups.get(`debut-erd-backup:${id}`);
+    cleanup();
+    mount();
+    await api!.getConfig();
+    expect(await backups.get(`debut-erd-backup:${id}`)).toEqual(backup);
+    expect(await api!.listTables(id)).toHaveLength(1);
+    db.close();
 });
 it('persists edits in IndexedDB and restores them on another branch without losing absent tables', async () => {
     Dexie.dependencies.indexedDB = new IDBFactory();

@@ -27,10 +27,13 @@ const requiredEntries = [
     'package.json',
     'package-lock.json',
     'KEEPERD_VERSION',
+    'src/lib/local-branch-merge.ts',
+    'src/lib/repository-layout.ts',
     'LICENSE',
     'NOTICE',
 ];
 const requiredRuntimeTools = [
+    'node-runtime.mjs',
     'index.html',
     'library.html',
     'stop.mjs',

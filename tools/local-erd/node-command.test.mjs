@@ -17,6 +17,9 @@ test('uses the running Node executable while it is still available', () => {
     }
 });
 
-test('falls back to PATH after the running Node executable is removed', () => {
-    assert.equal(nodeCommand('/missing/homebrew/cellar/node'), 'node');
+test('requires a restart instead of silently switching to another Node', () => {
+    assert.throws(
+        () => nodeCommand('/missing/homebrew/cellar/node'),
+        /다시 시작/
+    );
 });

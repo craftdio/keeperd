@@ -329,8 +329,8 @@
                 <a class="button" href="/">← Sync 화면</a>
             </header>
             <p>
-                Sync로 만든 스키마 파일과 현재 브라우저에서 편집한 ERD 작업
-                데이터를 관리하세요. GitHub 로그인 없이 볼 수 있습니다.
+                Sync로 만든 스키마 파일과 로컬 서버에 저장된 ERD 작업 데이터를
+                관리하세요. GitHub 로그인 없이 볼 수 있습니다.
             </p>
             <p>
                 KeepERD는 ChartDB 기반의 독립적인 비공식 포크이며, ChartDB와
@@ -373,7 +373,7 @@
                         >
                     </div>
                     <div>
-                        <strong>이 브라우저의 ERD 작업 데이터</strong>
+                        <strong>서버의 ERD 작업 데이터</strong>
                         <span
                             >직접 수정한 테이블 배치·색상·영역·메모·필터입니다.
                             삭제하면 다시 Sync해도 복구되지 않습니다.</span
@@ -398,10 +398,10 @@
             </p>
             <div id="cards" class="cards"></div>
             <footer>
-                브라우저 작업 데이터 용량은 JSON 크기 추정치이며 실제 디스크
-                점유량과 다를 수 있습니다.<br />선택 삭제는 위 두 종류의
-                데이터와 자동 백업을 지웁니다. 다른 브라우저의 데이터는 지우지
-                않습니다.<br />직접 GitHub에서 내려받아 작업 중인 프로젝트
+                작업 데이터 용량은 JSON 크기 추정치이며 실제 디스크 점유량과
+                다를 수 있습니다.<br />선택 삭제는 위 두 종류의 데이터와 자동
+                백업을 지웁니다. 같은 KeepERD 서버를 사용하는 모든 브라우저에
+                반영됩니다.<br />직접 GitHub에서 내려받아 작업 중인 프로젝트
                 폴더와, ChartDB가 다음 Sync를 위해 내부에 보관한 코드 복사본도
                 삭제하지 않습니다.<br />카드의
                 <strong>이 브랜치에서 마지막으로 Sync한 스키마 JSON</strong>은
@@ -422,12 +422,12 @@
                 <p id="delete-summary"></p>
                 <div id="delete-targets" class="dialog-targets"></div>
                 <p>
-                    Sync 결과 스키마 파일과 이 브라우저의
+                    Sync 결과 스키마 파일과 서버에 저장된
                     배치·색상·영역·메모·필터·자동 백업을 삭제합니다.
                 </p>
                 <p class="dialog-warning">
-                    브라우저 작업 데이터는 다시 Sync해도 복구되지 않습니다.
-                    중요한 작업은 먼저 ChartDB JSON으로 내보내세요.
+                    편집한 작업 데이터는 다시 Sync해도 복구되지 않습니다. 중요한
+                    작업은 먼저 ChartDB JSON으로 내보내세요.
                 </p>
                 <p>
                     직접 받은 프로젝트 폴더와 ChartDB가 Sync용으로 보관한 코드

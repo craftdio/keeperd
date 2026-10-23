@@ -152,9 +152,17 @@ test('serves the management page without GitHub auth and protects deletion APIs'
         'state-lock.mjs',
         'stop-control.mjs',
         'node-command.mjs',
+        'node-runtime.mjs',
+        'workspace-store.mjs',
         'open-browser.mjs',
     ])
         await copyFile(path.join(source, name), path.join(root, name));
+    await mkdir(path.join(project, 'src/lib'), { recursive: true });
+    for (const name of ['local-branch-merge.ts', 'repository-layout.ts'])
+        await copyFile(
+            new URL('../../src/lib/' + name, import.meta.url),
+            path.join(project, 'src/lib', name)
+        );
     await writeFile(
         path.join(root, 'server.mjs'),
         (await readFile(path.join(source, 'server.mjs'), 'utf8')).replaceAll(

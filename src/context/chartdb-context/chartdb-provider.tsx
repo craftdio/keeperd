@@ -1940,8 +1940,11 @@ export const ChartDBProvider: React.FC<
     const updateDiagramData: ChartDBContext['updateDiagramData'] = useCallback(
         async (diagram, options) => {
             const st = options?.forceUpdateStorage ? storageDB : db;
-            await st.deleteDiagram(diagram.id);
-            await st.addDiagram({ diagram });
+            if (st.replaceDiagram) await st.replaceDiagram({ diagram });
+            else {
+                await st.deleteDiagram(diagram.id);
+                await st.addDiagram({ diagram });
+            }
             loadDiagramFromData(diagram);
         },
         [db, storageDB, loadDiagramFromData]

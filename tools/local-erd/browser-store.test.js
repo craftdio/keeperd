@@ -1,3 +1,16 @@
+import { sqliteWorkspaceFixture } from '../../src/test/sqlite-workspace-fixture.js';
+import { readLegacyWorkspace } from './browser-migration.js';
+let fixture;
+vi.mock('./workspace-client.js', () => ({
+    workspaceNotice: () => {},
+    readWorkspace: async () => fixture.store.view(),
+    writeWorkspace: async (action, params) =>
+        fixture.store.mutate({
+            action,
+            params,
+            revision: fixture.store.view().revision,
+        }),
+}));
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { browserDiagrams, deleteBrowserDiagrams } from './browser-store.js';
@@ -11,6 +24,7 @@ const stores = [
     'notes',
     'diagram_filters',
     'config',
+    'local_erd_backups',
 ];
 const request = (r) =>
     new Promise((resolve, reject) => {
@@ -20,8 +34,10 @@ const request = (r) =>
 beforeEach(() => {
     vi.stubGlobal('indexedDB', new IDBFactory());
     localStorage.clear();
+    fixture = sqliteWorkspaceFixture();
 });
 afterEach(() => {
+    fixture.close();
     vi.unstubAllGlobals();
 });
 async function seed() {
@@ -29,7 +45,12 @@ async function seed() {
     r.onupgradeneeded = () => {
         for (const name of stores)
             r.result.createObjectStore(name, {
-                keyPath: name === 'diagram_filters' ? 'diagramId' : 'id',
+                keyPath:
+                    name === 'diagram_filters'
+                        ? 'diagramId'
+                        : name === 'local_erd_backups'
+                          ? 'key'
+                          : 'id',
             });
     };
     const db = await request(r);
@@ -45,9 +66,25 @@ async function seed() {
         }
         for (const id of ['debut-main', 'debut-develop'])
             tx.objectStore(name).put(
-                name === 'diagrams'
-                    ? { id, name: id, updatedAt: new Date() }
-                    : { id: `${name}:${id}`, diagramId: id, content: 'fixture' }
+                name === 'local_erd_backups'
+                    ? {
+                          key: `debut-erd-backup:${id}`,
+                          diagramId: id,
+                          value: 'backup fixture',
+                      }
+                    : name === 'diagrams'
+                      ? {
+                            id,
+                            name: id,
+                            databaseType: 'postgresql',
+                            createdAt: new Date(),
+                            updatedAt: new Date(),
+                        }
+                      : {
+                            id: `${name}:${id}`,
+                            diagramId: id,
+                            content: 'fixture',
+                        }
             );
     }
     await new Promise((resolve, reject) => {
@@ -55,8 +92,11 @@ async function seed() {
         tx.onabort = () => reject(tx.error);
     });
     db.close();
+    fixture.store.migrate(
+        JSON.parse(JSON.stringify(await readLegacyWorkspace()))
+    );
 }
-it('reads existing diagrams and counts related rows without creating or upgrading the database', async () => {
+it('lists authoritative SQLite diagrams and counts backups while retaining legacy browser originals', async () => {
     expect(await browserDiagrams()).toEqual([]);
     expect(await indexedDB.databases()).toEqual([]);
     await seed();
@@ -64,6 +104,7 @@ it('reads existing diagrams and counts related rows without creating or upgradin
     expect(result).toHaveLength(2);
     expect(result[0].tables).toBe(1);
     expect(result[0].bytes).toBeGreaterThan(100);
+    expect(result[0].backupBytes).toBe(new Blob(['backup fixture']).size);
     expect((await indexedDB.databases())[0].version).toBe(1);
 });
 it('deletes only selected diagram rows, related stores, default reference and backups', async () => {
