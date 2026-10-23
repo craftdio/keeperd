@@ -287,6 +287,7 @@ it('migrates read-only browser data once without upgrading or removing the origi
             tables: [{ ...diagram.tables[0], x: 999 }],
         })
     );
+    localStorage.setItem('debut-erd-revision:debut-main', 'v2:old');
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
         throw new DOMException('Full', 'QuotaExceededError');
     });
@@ -296,6 +297,12 @@ it('migrates read-only browser data once without upgrading or removing the origi
     expect((await second.readWorkspace()).diagrams).toHaveLength(1);
     expect((await indexedDB.databases())[0].version).toBe(14);
     expect(localStorage.getItem('debut-erd-backup:debut-main')).toBeTruthy();
+    const migration = calls.find(
+        (call) => JSON.parse(call.options.body ?? '{}').action === 'migrate'
+    );
+    expect(
+        JSON.parse(migration.options.body).params.sourceRevisions['debut-main']
+    ).toBe('v2:old');
 });
 it('rejects an old browser revision and stops subsequent writes without overwriting the winner', async () => {
     const first = await client();

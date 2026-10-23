@@ -189,6 +189,47 @@ test('archives the old server layout before applying an incoming shared layout',
         )
     );
 });
+test('migration of a known old Git revision preserves the current schema even after an unknown browser imported first', (t) => {
+    const { store } = fixture(t);
+    store.syncSnapshots(snapshot(diagram(), 'current'));
+    const older = dated(111, '02');
+    older.tables.push({ ...diagram('retired').tables[0], name: 'retired' });
+    store.migrate({ diagrams: [older] });
+    const incoming = {
+        ...older,
+        name: 'Newest browser work',
+        updatedAt: dated(1, '03').updatedAt,
+        tables: older.tables.map((table) => ({ ...table, x: 999 })),
+        notes: [{ id: 'note', content: 'keep this edit' }],
+    };
+    const state = store.migrate({
+        diagrams: [incoming],
+        sourceRevisions: { 'debut-main': 'v2:old' },
+    });
+    assert.deepEqual(
+        state.diagrams[0].tables.map((table) => table.name),
+        ['users']
+    );
+    assert.equal(state.diagrams[0].tables[0].x, 999);
+    assert.equal(state.diagrams[0].name, incoming.name);
+    assert.equal(state.diagrams[0].updatedAt, incoming.updatedAt);
+    assert.equal(state.diagrams[0].notes[0].content, 'keep this edit');
+    assert.ok(
+        state.backups.some((item) =>
+            store
+                .readBackup(item.id)
+                .tables?.some((table) => table.name === 'retired')
+        )
+    );
+    const sameRevision = { ...incoming, updatedAt: dated(1, '04').updatedAt };
+    assert.equal(
+        store.migrate({
+            diagrams: [sameRevision],
+            sourceRevisions: { 'debut-main': 'v2:current' },
+        }).diagrams[0].tables.length,
+        2
+    );
+});
 test('equal timestamps keep the saved ERD without duplicates and archive the other browser', (t) => {
     const { store } = fixture(t);
     store.syncSnapshots(snapshot(diagram()));

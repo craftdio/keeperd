@@ -78,6 +78,7 @@ export function openWorkspace(
         CREATE TABLE IF NOT EXISTS backups (id INTEGER PRIMARY KEY AUTOINCREMENT, diagram_id TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, bytes INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS backups_diagram ON backups(diagram_id, id);`);
     let backupWarning;
+    const sourceDiagrams = new Map();
     const revision = () =>
         Number(
             db.prepare("SELECT body FROM meta WHERE key='revision'").get().body
@@ -296,6 +297,10 @@ export function openWorkspace(
             for (const snapshot of payload.snapshots ?? []) {
                 const incoming = snapshot.diagram;
                 validateDiagram(incoming);
+                sourceDiagrams.set(incoming.id, {
+                    diagram: incoming,
+                    revision: String(snapshot.revision),
+                });
                 const stored = row(incoming.id);
                 if (stored?.source_revision === String(snapshot.revision))
                     continue;
@@ -434,10 +439,29 @@ export function openWorkspace(
                         wins ? previous : original
                     );
                 if (wins) {
-                    // Migrate the complete saved edit, including schema edits
-                    // and deletions. A later Git revision still uses normal Sync.
-                    const diagram = structuredClone(original);
-                    saveLayout(stored?.repository, diagram, {
+                    const browserRevision =
+                        input.sourceRevisions?.[original.id];
+                    const staleSchema =
+                        stored?.source_revision &&
+                        typeof browserRevision === 'string' &&
+                        browserRevision.startsWith('v2:') &&
+                        browserRevision !== `v2:${stored.source_revision}`;
+                    const source = sourceDiagrams.get(original.id);
+                    const schema =
+                        source && source.revision === stored?.source_revision
+                            ? source.diagram
+                            : parse(stored);
+                    // Keep proven-newer Git structure; retain the complete old
+                    // browser edit for recovery rather than silently dropping it.
+                    if (staleSchema) backup(original.id, 'migration', original);
+                    const diagram = staleSchema
+                        ? {
+                              ...mergeBranchDiagram(schema, original),
+                              name: original.name,
+                              updatedAt: original.updatedAt,
+                          }
+                        : structuredClone(original);
+                    saveLayout(stored?.repository, original, {
                         migrating: true,
                     });
                     put(diagram, { ...stored, edited: 1 });

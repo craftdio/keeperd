@@ -13,6 +13,7 @@ const prefixes = [
     'debut-repo-layout-backup:',
     'debut-layout-backup:',
 ];
+const revisionPrefix = 'debut-erd-revision:';
 const result = (request) =>
     new Promise((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
@@ -51,7 +52,13 @@ async function openLegacy() {
     });
 }
 export async function readLegacyWorkspace() {
-    const payload = { diagrams: [], backups: [], filters: [], layouts: [] };
+    const payload = {
+        diagrams: [],
+        backups: [],
+        filters: [],
+        layouts: [],
+        sourceRevisions: {},
+    };
     const db = await openLegacy();
     let recoverLegacyLayout = false;
     try {
@@ -94,6 +101,14 @@ export async function readLegacyWorkspace() {
             payload.backups = (rows.local_erd_backups ?? []).filter((row) =>
                 prefixes.some((prefix) => row.key.startsWith(prefix))
             );
+            payload.sourceRevisions = Object.fromEntries(
+                (rows.local_erd_backups ?? [])
+                    .filter((row) => row.key.startsWith(revisionPrefix))
+                    .map((row) => [
+                        row.key.slice(revisionPrefix.length),
+                        row.value,
+                    ])
+            );
             payload.filters = rows.diagram_filters ?? [];
             payload.layouts = (rows.repository_layouts ?? []).filter(
                 (layout) => layout.version === 2
@@ -110,6 +125,15 @@ export async function readLegacyWorkspace() {
         for (let index = 0; index < localStorage.length; index++) {
             const key = localStorage.key(index),
                 prefix = prefixes.find((prefix) => key?.startsWith(prefix));
+            if (
+                key?.startsWith(revisionPrefix) &&
+                !Object.hasOwn(
+                    payload.sourceRevisions,
+                    key.slice(revisionPrefix.length)
+                )
+            )
+                payload.sourceRevisions[key.slice(revisionPrefix.length)] =
+                    localStorage.getItem(key);
             if (prefix && !payload.backups.some((row) => row.key === key))
                 payload.backups.push({
                     key,
