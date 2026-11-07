@@ -61,8 +61,7 @@ Turn versioned schemas into ERDs. Sync GitHub or local branches, compare changes
 Install [Homebrew](https://brew.sh), then install and start a Docker-compatible runtime for schema replay.
 
 ```sh
-brew tap craftdio/keeperd
-brew install keeperd
+brew install craftdio/keeperd/keeperd
 keeperd init
 keeperd start
 ```
