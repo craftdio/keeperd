@@ -1,227 +1,78 @@
-<p align="center">
-  <strong>🍴 KeepERD — 커스텀 기능 사용법</strong>
-</p>
+# KeepERD — Usage Guide
 
-<p align="center">
-  <a href="../../README.md">루트 README</a> &bull;
-  <a href="SETUP.md">설치·실행 가이드</a> &bull;
-  <strong>커스텀 기능 사용법</strong>
-</p>
+[Overview](../../README.md) · [Install](SETUP.md) · [Sync](#sync-a-repository) · [Share](#share-layouts) · [Backups](SQLITE.md)
 
-KeepERD는 ChartDB에 GitHub 레포·브랜치별 PostgreSQL ERD와 **레포 선택 → 브랜치 선택 → Sync** 기능을 추가한 독립적인 비공식 포크다. ChartDB와 제휴하거나 ChartDB의 보증을 받지 않는다. 원본 저작권 고지와 AGPL-3.0 라이선스를 유지하며, 자세한 출처 표기는 루트 [NOTICE](../../NOTICE)를 참고한다.
+KeepERD reads schema files from Git and builds an ERD locally. Changing branches updates the schema while keeping the repository's layout, colors, Areas, and notes.
 
-## 처음 사용한다면
+## Sync a repository
 
-준비물부터 clone·인증·설정·빌드·브라우저 실행까지는 **[설치·실행 가이드](SETUP.md)**를 순서대로 따라온다.
+Start with `keeperd start`, then open the address printed in your terminal.
 
-최초 준비는 `npm run local:init` 한 번으로 처리한다. 저장소 URL을 입력하면 설정·의존성 설치·첫 스키마 생성·빌드를 자동 수행한다. 다음부터는 `npm run local:start`만 실행한다. `local:start`는 ChartDB 코드가 바뀌었거나 빌드가 없을 때만 현재 코드로 자동 빌드한다. 서버 준비가 끝나면 macOS 기본 브라우저에서 실제 `localhost` 주소를 한 번 연다. 자동 열기를 끄려면 `npm run local:start -- --no-open`(설치본은 `keeperd start --no-open`)을 사용한다. CI·SSH 또는 브라우저 실행 실패 시에는 터미널에 표시된 주소를 직접 열면 된다. 최근 사용한 브라우저·프로필은 추측하지 않는다.
+| Source                  | Steps                                                                                                             |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| GitHub                  | Sign in with `gh auth login` and `gh auth setup-git`, select an account, repository, and branch, then **Sync**.   |
+| Local clone or worktree | Choose the local source, register its absolute path, select a branch, then **Sync**. No GitHub login is required. |
 
-## 계정·레포·브랜치 선택과 Sync
+The GitHub account is the server's GitHub CLI account, which may differ from your browser login. Use `gh auth switch` to change it, then refresh the account list.
 
-Sync 화면: [http://localhost:18777/](http://localhost:18777/) · [저장된 ERD 관리](http://localhost:18777/saved)
+Local input requires a GitHub origin URL. Unpushed commits are supported. Enable working changes to include supported staged, unstaged, and untracked schema files from the current checkout. Selecting another branch does not change your checkout; working changes apply only to the current branch. Remote, local-commit, and working-copy ERDs are stored separately.
 
-`npm run local:start`로 시작하고 메인 화면에서 **조직/계정 → 레포 → 브랜치 → Sync**를 누른다. 진행률을 표시하고 성공하면 선택한 레포·브랜치의 ERD를 연다. 레포 선택은 브랜치 목록만 바꾸며, Sync를 누르기 전에는 새 스키마를 생성하지 않는다. 메인의 **저장된 ERD 관리**는 선택한 조직·레포로 필터링한 관리 페이지를 연다. ERD 화면 오른쪽 위에는 브랜치와 Sync만 표시한다. 상단의 **레포·브랜치 제목**을 누르면 조직/계정·레포·브랜치를 다시 골라 Sync 후 이동할 수 있다. 로컬 ERD에서는 이 제목을 직접 수정하지 않는다.
+Use the repository/branch title in the editor to switch inputs. Refresh actions reload repository or branch lists; **Sync** updates the schema. Changes are not polled automatically. A failed Sync leaves the existing ERD in place.
 
-다른 터미널에서 서버를 종료할 때는 `npm run local:stop`(설치본은 `keeperd stop`)을 사용한다. 현재 사용자 데이터 폴더의 서버만 확인해 종료하며, Sync 중이거나 잠금 소유자를 확인할 수 없으면 종료하지 않는다. 기존 설정·스냅샷·브라우저 작업 데이터는 지우지 않는다.
+## Supported schema inputs
 
-- 중앙 프로필 이미지·이름·아이디는 **현재 서버의 GitHub CLI 로그인 계정** 기준이다. 브라우저의 github.com 로그인과 다를 수 있다. 계정을 바꾸려면 `gh auth switch` 또는 `gh auth login` 후 화면의 계정·레포 목록 새로고침을 누른다.
-- 인증이 없거나 만료됐으면 메인 화면에 터미널 로그인 안내가 표시되고 **GitHub 원격 입력의** 조직·레포 선택과 Sync만 잠긴다. **로컬 저장소 입력은 GitHub 로그인 없이 계속 선택하고 Sync할 수 있다.** 서버를 실행한 컴퓨터의 터미널에서 아래 명령을 실행하고 **로그인 다시 확인**을 누른다. 서버 재시작은 필요 없으며 기존 ERD·배치는 삭제되지 않는다. `gh`가 없다면 GitHub CLI를 먼저 설치한다. 네트워크·권한 오류는 로그인 오류와 별도로 안내한다.
+**Workspace storage is SQLite. Schema replay uses a temporary PostgreSQL 17 container.** You do not install a PostgreSQL server or connect KeepERD to your production database.
 
-```sh
-gh auth login --hostname github.com --git-protocol https --web
-gh auth setup-git
-gh auth status
-```
+| Input                | Support                                                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `db/schema/*.sql`    | Preferred declarative schema input.                                                                              |
+| `db/migration/*.sql` | Sequential SQL replay when declarative schema files are absent.                                                  |
+| Flyway SQL           | Configured repositories only; versioned and repeatable migrations use the official runner.                       |
+| Alembic revisions    | Configured repositories only; the runner requires a single migration head.                                       |
+| Airflow metadata     | Configured repositories only; reproduces Airflow's metadata database, without running DAGs or business services. |
 
-- 개인 소유·협업·조직 멤버십으로 접근할 수 있는 레포를 페이지 끝까지 조회한다. 검색창으로 이름을 좁히고 레포를 선택한다. 마지막 선택은 이 브라우저에 저장한다.
-- 레포마다 최초 Sync 시 별도 복제본을 만들며, 서버 하나에서 여러 레포를 번갈아 볼 수 있다. 같은 `main`·`develop` 이름이어도 레포별 ERD와 배치가 분리된다. 다른 레포의 기존 스냅샷은 삭제하지 않는다.
-- **PostgreSQL 17용 `db/schema/*.sql` 선언 스키마를 우선 사용**하고, 선언 스키마가 없는 레포는 `db/migration/*.sql`을 순서대로 재생한다. 두 경로가 모두 있으면 migration은 CI·배포용 파생 이력으로 보고 실행하지 않는다. 아래에 등록된 저장소는 Flyway SQL, Alembic Python revision 또는 Airflow 자체 메타 DB를 각 도구의 규칙으로 실행한다. 목록에 표시되는 모든 레포가 동기화 가능한 것은 아니며, 지원할 입력이 없거나 적용에 실패하면 새 ERD를 게시하지 않고 기존 데이터를 유지한다.
+Schema Sync currently targets PostgreSQL. Other database engines, arbitrary migration configurations, production database imports, dumps, and ORM model inference are outside this Sync workflow. See the [schema replay profiles](schema-replay.mjs) for the supported repository configurations.
 
-- 목록은 로컬 서버가 `gh api`로 GitHub에서 페이지 끝까지 조회한다. 인증 토큰은 브라우저에 전달하지 않는다. 계정·레포·저장소별 브랜치 목록은 서버가 실행되는 동안 메모리에 보관하므로 화면을 다시 열 때 GitHub를 매번 조회하지 않는다. 홈의 **계정·레포·선택 브랜치 새로고침**은 계정과 레포 및 현재 선택한 원격 레포의 브랜치를 갱신한다. 홈의 브랜치 옆 `↻`과 ERD 이동 창의 **브랜치 목록 새로고침**은 선택한 저장소의 브랜치만 갱신한다(로컬 Git은 등록된 worktree를 다시 읽는다). 서버를 종료하면 캐시는 사라진다.
-- 현재 ERD의 브랜치를 기본 선택하며, 한 번의 Sync는 선택한 브랜치만 갱신한다. 다른 브랜치의 스냅샷과 배치는 유지한다.
-- Sync가 끝나면 로컬·원격 브랜치 모두 `develop`/`main` 중 가장 가까운 **공통 조상 커밋의 스키마**와 비교한다. 새 테이블과 필드, 정의가 바뀐 테이블과 필드는 형광 초록으로 표시하고 삭제된 항목은 상단 안내에 개수로 표시한다. 기준 커밋에 테이블이 없었다면 개별 테이블 대신 캔버스 전체에 큰 테두리를 표시한다. Git에는 실제 생성 출처가 기록되지 않으므로 화면에는 단정적인 “분기됨” 대신 `develop 공통 기준 1ab5a14`처럼 표시한다.
-- `/`, `#` 등이 있는 브랜치는 안정적인 해시 ID를 사용한다. 기존 develop/main URL은 유지한다. 생성한 ERD는 **저장된 ERD 관리** 페이지에서 다시 열 수 있다.
-- GitHub에서 브랜치가 삭제돼도 기존 로컬 스냅샷은 삭제하지 않는다. 삭제된 브랜치는 목록에서 사라지고, 해당 브랜치 동기화는 실패하며 기존 데이터는 보존한다.
-- GitHub 권한·네트워크 오류는 목록 옆에 표시한다. 조회 실패 시 `↻`로 재시도한다. 선언 스키마·마이그레이션이 없거나 SQL 실행에 실패한 브랜치는 ERD를 생성하지 않는다.
-- GitHub 저장소와 브랜치는 화면에서 선택해 Sync한다. 초기화 명령에 저장소 URL을 넣거나 설정 파일을 직접 편집할 필요가 없다.
+<details>
+<summary>Configured runners</summary>
 
-일반 `npm run dev` / `npm run build`는 기존 ChartDB 동작을 유지한다. 로컬 동기화는 `local:build`가 설정하는 `VITE_LOCAL_ERD=true` 빌드에서만 활성화된다.
+| Repository                             | Runner and input                                                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `NangmanAzit/myhouse-agent-backend`    | Flyway 11.7.2; `src/main/resources/db/migration`, schema `myhouse_agent`.                                      |
+| `NangmanAzit/nangmanazit-data-batch`   | Flyway 11.7.2; `src/main/resources/db/migration`, schema `public`.                                             |
+| `NangmanAzit/myhouse-backend`          | Python 3.14, Alembic 1.18.4, SQLAlchemy 2.0.51; `alembic/versions`, schema `myhouse`.                          |
+| `NangmanAzit/nangmanazit-data-airflow` | Airflow 3.3.1 / Python 3.12 / FAB; versions must match `Dockerfile`, `docker-compose.yml`, and `.env.example`. |
 
-## 로컬 브랜치·미커밋 변경 미리보기
+Runners reproduce supported inputs in an isolated temporary database, extract its schema, and remove the temporary resources. They do not receive production credentials or start application servers, workers, or DAGs. Adding a repository profile requires implementation and replay tests.
 
-메인 화면에서 **입력 출처 → 로컬 저장소**를 선택하고 서버 컴퓨터의 clone/worktree 절대 경로를 등록한다. HTTPS 또는 SSH GitHub origin이 필요하며 등록 정보는 KeepERD 전역 `config.json`에만 저장된다. 실제 절대 경로의 해시를 ID에 포함하므로 같은 원격 저장소를 여러 clone이나 worktree로 사용해도 서로 다른 로컬 입력으로 유지된다. GitHub 로그인 없이 로컬 브랜치를 조회하고 Sync할 수 있다.
+</details>
 
-- **브랜치 커밋**: 로컬 Git refs의 커밋을 읽는다. push하지 않은 브랜치·커밋도 가능하며 다른 브랜치를 선택해도 checkout은 바꾸지 않는다.
-- **작업 중 변경 포함**: 현재 checkout 브랜치의 staged/unstaged·미추적 `db/schema`·`db/migration`, 등록된 Flyway SQL, Alembic 설정·env.py·revision, Airflow 버전 파일과 삭제를 캡처한다. 선언 스키마가 존재하면 해당 파일만 ERD 입력으로 사용한다. Git ignored 파일과 symlink는 제외/차단하며, 다른 브랜치나 detached HEAD에는 작업 변경을 적용하지 않는다.
-- **원격 반영 확인**: 사용자가 누를 때만 `git ls-remote`로 같은 이름의 원격 브랜치를 확인한다. checkout·fetch·stash·자동 commit/push를 하지 않는다. 조회 실패 또는 원격 커밋의 포함 관계를 비교할 수 없으면 미확인으로 안내한다. 결과는 확인 시점 기준이며 로컬 커밋이 바뀌면 재확인한다.
-- 화면과 카드에는 로컬 출처, commit, 입력 fingerprint와 캡처 시각을 표시한다. 미커밋 작업 변경은 원격에 반영되지 않은 로컬 변경임을 명시한다. Sync 중 파일을 편집하면 이미 캡처한 입력으로 진행하며, 캡처 중 변경을 감지하면 재시도를 안내한다.
-- 원격 ERD·로컬 브랜치 커밋·로컬 작업 중 ERD는 **서로 다른 ID로 저장**한다. worktree도 구분한다. 같은 소스를 다시 Sync하면 배치·색상이 유지되며, push 후에도 원격 ERD를 자동 덮어쓰지 않는다.
-- 로컬 입력도 **PostgreSQL 17용 `db/schema/*.sql`을 우선 재현**하고, 없으면 `db/migration/*.sql`을 사용한다. 등록된 Flyway/Alembic/Airflow 저장소는 커밋/작업 폴더의 버전·마이그레이션 입력을 같은 격리 실행기로 재현한다. Atlas 선언형 레포는 CI가 migration을 생성하기 전에도 로컬 schema 변경을 볼 수 있다. 지원 경로의 migration이나 버전 파일이 아닌 모델·코드만 수정했다면 ERD 구조에는 반영되지 않는다.
+## Compare branches
 
-CLI에서는 `npm run local:sync -- --local=등록ID --branch=main`을 사용하고 작업 변경을 포함하려면 `--worktree`를 추가한다. 최초 등록·준비는 `npm run local:init -- --local=/absolute/clone/path --branch=main`으로 할 수 있다.
+KeepERD compares the selected branch with the nearest available common ancestor against `develop` or `main`. Added and changed tables or fields are highlighted; removed items are counted in the comparison notice. If no comparison base can be resolved, a comparison is unavailable.
 
-잘못된 경로·Git 루트·origin·ref·권한, 브랜치와 작업 폴더 불일치, 캡처 실패는 별도 오류로 안내한다. 실패해도 기존 ERD·배치는 유지한다. PostgreSQL과 migration runner는 외부 포트와 외부 네트워크가 없는 실행별 Docker 네트워크 namespace에서 메모리 512MiB·CPU 1·PID 128로 제한하고 외부 명령은 최대 120초에 종료한다. 선언 스키마와 migration 자체에 비밀값을 넣지 않는다.
+Table layout is shared by repository and matched by schema and table name. Tables absent from a branch keep their saved layout for when they reappear. Renames are treated as removal and addition. New tables receive new positions.
 
-## Flyway·Alembic·Airflow 지원 설정과 안전 경계
+## Share layouts
 
-Flyway는 저장소마다 DB 버전·도구 버전·경로·대상 스키마·초기 준비가 명시된 경우에만 실행한다. 파일 이름의 문자열 정렬로 흉내 내지 않고 공식 Flyway의 versioned/repeatable 규칙에 맡긴다.
+Open the editor's workspace-sharing action to export or import JSON. The receiving ERD must belong to the **same repository**. Different branches and commits are supported; matching uses schema and table names, and missing tables are skipped. Sharing changes layout, not database structure.
 
-| 저장소                               | PostgreSQL           | Flyway 이미지                  | 마이그레이션 경로                 | 대상/기본 스키마 | 초기 준비   |
-| ------------------------------------ | -------------------- | ------------------------------ | --------------------------------- | ---------------- | ----------- |
-| `NangmanAzit/myhouse-agent-backend`  | `postgres:17-alpine` | `redgate/flyway:11.7.2-alpine` | `src/main/resources/db/migration` | `myhouse_agent`  | 스키마 생성 |
-| `NangmanAzit/nangmanazit-data-batch` | `postgres:17-alpine` | `redgate/flyway:11.7.2-alpine` | `src/main/resources/db/migration` | `public`         | 없음        |
+1. Export the current workspace as `*.keeperd-layout.json` from the sharing panel.
+2. Open an ERD from the same repository on the receiving computer or browser.
+3. Choose the JSON file, review its source and item counts, and apply it.
 
-실행기는 선택된 SQL만 임시 폴더에 복사해 read-only로 마운트한다. 운영 DB 주소·계정, 애플리케이션 환경 변수, 저장소 전체, 호스트 Docker socket은 Flyway 컨테이너에 전달하지 않는다. Spring Boot·Gradle·Batch job도 실행하지 않는다. 매 Sync마다 빈 임시 PostgreSQL DB에 적용하고 결과를 추출한 뒤 컨테이너·네트워크·임시 SQL을 제거한다. Flyway 이력 테이블은 ERD에서 제외한다.
+Exports include table positions, sizes, colors, Areas, and notes. Applying a layout attempts a backup first; if backup storage fails, a warning is shown and the import can continue. Use the sharing panel's undo action to restore the previous import state while its recovery backup is retained.
 
-Alembic은 다음 명시적 프로필만 지원한다. `down_revision` graph는 Alembic 자체가 순회하며, `head`가 여러 개이면 어느 branch도 임의 선택하지 않고 설정 오류로 중단한다. 자세한 revision branch 동작은 [Alembic 공식 문서](https://alembic.sqlalchemy.org/en/latest/branches.html)를 따른다.
+Sharing uses manual JSON files, with no automatic upload. Exports can contain note text. Files over 5 MB or with invalid content are rejected.
 
-| 저장소                        | PostgreSQL           | Python 이미지                  | Alembic/SQLAlchemy  | revision 경로           | 대상 스키마 |
-| ----------------------------- | -------------------- | ------------------------------ | ------------------- | ----------------------- | ----------- |
-| `NangmanAzit/myhouse-backend` | `postgres:17-alpine` | digest 고정 `python:3.14-slim` | `1.18.4` / `2.0.51` | `alembic/versions/*.py` | `myhouse`   |
+## Edit and manage ERDs
 
-첫 실행은 고정 Python 이미지에 Alembic·SQLAlchemy·psycopg만 설치한 최소 runner 이미지를 빌드하며 이후 Docker cache를 재사용한다. 선택 입력의 `alembic.ini`, `alembic/env.py`, revision 존재 여부를 확인하지만 애플리케이션 모델을 import하는 원본 `env.py`는 실행하지 않는다. 대신 KeepERD의 최소 online 어댑터가 빈 DB에 `myhouse` 스키마를 준비하고 revision만 실행한다. runner는 비루트·read-only filesystem이며 revision 폴더만 read-only로 마운트한다. 운영 자격 증명, `.env`, 앱 코드, 저장소 전체, 호스트 Docker socket은 전달하지 않고 API 서버·worker도 시작하지 않는다. Alembic version table은 ERD에서 제외한다.
+- Use **Filter Tables** to search by schema or Area and toggle visibility. Non-`public` schemas may initially be hidden. On macOS, `⌘F` toggles the panel.
+- Use **Tables**, **DBML**, **Refs**, and **Visuals** to inspect structure and organize Areas and notes.
+- Open the saved-ERD manager at `/saved` to search or delete saved work. Deletion affects all browsers using the same data directory. Export important work first; re-syncing does not restore deleted layouts or notes.
 
-Airflow는 다음 명시적 프로필만 지원한다. 선택한 브랜치의 세 파일에서 버전과 auth manager가 모두 일치해야 한다.
+Editor changes stay local; they do not change repository files or a live database. A later Sync can replace manual schema edits. Browsers share persisted workspace data, without live merging of simultaneous edits. If a save conflict occurs, export unsaved work as diagram JSON before refreshing.
 
-| 저장소                                 | 버전 입력                                          | 공식 이미지                       | 메타 DB 명령         | auth manager |
-| -------------------------------------- | -------------------------------------------------- | --------------------------------- | -------------------- | ------------ |
-| `NangmanAzit/nangmanazit-data-airflow` | `Dockerfile`, `docker-compose.yml`, `.env.example` | `apache/airflow:3.3.1-python3.12` | `airflow db migrate` | FAB          |
+For migration, backup limits, and recovery, see [Storage & Backups](SQLITE.md). For Sync errors and authentication, see [Troubleshooting](SETUP.md#troubleshooting).
 
-Airflow runner는 빈 임시 PostgreSQL DB와 같은 외부 통신 불가 network namespace에서 read-only로 실행한다. 대상 저장소, DAG, plugin, `.env`, 운영 credential, 업무 DB 주소와 Docker socket은 마운트하거나 전달하지 않는다. DAG processor·scheduler·API server·Collector·Batch를 시작하지 않으며 예제 DAG도 비활성화한다. 따라서 결과는 DAG가 사용하는 Batch/Domain DB가 아니라 **Airflow 메타 DB**다. 공식 문서대로 `airflow db migrate`만 실행하고 `alembic_version`은 ERD에서 제외한다. 같은 입력의 재실행은 Airflow migration 이력에 의해 멱등이다.
-
-현재 범위에는 일반 `schema.sql`, dump 복원, 기존 DB 접속/가져오기, ORM/Collector 모델 추론, PostgreSQL 이외 DB 엔진, 등록되지 않은 Flyway/Alembic/Airflow 설정이 포함되지 않는다. 자체 migration 원본 또는 공식 버전을 결정할 입력이 없는 저장소는 지원하지 않는다. 새 저장소나 Airflow 버전을 지원하려면 코드의 명시적 프로필과 실제 재현 테스트를 함께 추가한다.
-
-### 오류 코드와 대응
-
-| 코드                                                | 의미와 확인할 곳                                                                        |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `SCHEMA_SOURCE_NOT_FOUND`                           | 지원 migration 입력이 없음. 안내되는 실제 지원 경로 확인                                |
-| `SCHEMA_METHOD_UNSUPPORTED`                         | 방식은 감지했지만 저장소별 실행 설정이 없음. Sync 버튼은 입력을 다시 선택할 때까지 잠김 |
-| `SCHEMA_CONFIGURATION_MISSING`                      | 등록 프로필의 경로/파일이 부족함. Sync 버튼은 입력을 다시 선택할 때까지 잠김            |
-| `SCHEMA_CONFIGURATION_AMBIGUOUS`                    | Alembic head가 여러 개임. merge revision으로 단일 head를 만든 뒤 재시도                 |
-| `SCHEMA_VERSION_UNSUPPORTED`                        | Airflow/Python/auth manager 버전 불일치 또는 미지원. 세 버전 입력을 일치시킨 뒤 재시도  |
-| `SCHEMA_REPLAY_FAILED`                              | SQL/Flyway/Alembic/Airflow 실행 실패. 버전·revision·PostgreSQL 호환성 확인              |
-| `SCHEMA_RUNNER_UNAVAILABLE`                         | Flyway/Alembic/Airflow 이미지 준비 실패. Docker build/pull 네트워크와 이미지 확인       |
-| `GITHUB_AUTH_REQUIRED` / `GITHUB_PERMISSION_DENIED` | 각각 CLI 로그인 / 저장소 권한 확인                                                      |
-| `GITHUB_NETWORK_FAILED` / `GIT_BRANCH_NOT_FOUND`    | 각각 네트워크 / 선택 브랜치 확인                                                        |
-| `DOCKER_UNAVAILABLE`                                | Docker Desktop·daemon·Docker 네트워크 확인                                              |
-
-스키마 오류는 “실제 DB가 없다”는 뜻이 아니다. KeepERD는 운영 DB를 확인하지 않으며, 어느 단계가 실패했는지 위 코드로 구분한다. 모든 실패는 새 스냅샷 게시 전에 중단되므로 기존 ERD 구조와 서버에 저장된 배치·색상·메모가 유지된다.
-
-## 저장된 ERD 관리와 용량 정리
-
-`/saved`에서 **Sync 결과 스키마 파일**과 **서버의 ERD 작업 데이터**를 합쳐 본다. Sync 결과 파일에는 Sync 시점의 테이블·컬럼·관계가 있고, 서버 작업 데이터에는 사용자가 바꾼 배치·색상·영역·메모·필터가 있다. GitHub 로그인 없이 사용할 수 있으며 조직/계정·레포 필터와 브랜치 검색을 제공한다. 출처를 확인할 수 없는 수동 ERD는 별도 항목으로 표시한다. 표시되는 작업 데이터 용량은 JSON 크기 추정치다.
-
-체크박스로 선택하거나 현재 목록 전체를 선택한 뒤 **선택 삭제**를 누른다(한 번에 최대 100개). 확인창에 나오는 대상과 삭제 범위를 읽고 진행한다. Sync 결과 스키마 파일과 서버의 테이블/관계·Area·메모·필터·기타 ERD 데이터, revision/자동 백업이 정리된다. Sync 결과 파일은 다시 Sync하면 생성되지만 서버에서 삭제한 배치·색상·메모는 복구되지 않는다. 중요한 작업은 ERD를 열어 최신 ChartDB JSON으로 내보낸다. 관리 페이지의 **Sync 결과 JSON**은 편집 데이터 백업이 아니다.
-
-편집 중인 ERD 탭은 닫고 삭제한다. 같은 브라우저에서 삭제 알림을 받은 해당 ERD 탭은 관리 페이지로 이동한다. 삭제는 같은 사용자 상태 폴더를 사용하는 모든 브라우저·프로필에 반영된다. 사용자가 직접 받은 프로젝트 폴더와 Sync용 내부 코드 복사본은 삭제하지 않는다. 이후 Sync하면 해당 ERD를 새로 생성할 수 있다.
-
-Sync 중 서버 삭제는 차단한다. 스키마 파일과 SQLite 사이에는 공통 트랜잭션이 없으므로 부분 실패 시 새로고침해 남은 항목을 재삭제한다. CLI Sync를 삭제 작업과 동시에 실행하지 않는다. 이전 브라우저 원본 정리에 실패해도 서버 삭제 결과는 유지하고 경고한다.
-
-## 배치·색상·Area·메모를 다른 브라우저와 공유
-
-ERD 화면 오른쪽 위의 **작업 데이터 공유**에서 현재 작업 데이터를 전용 JSON으로 내보내거나 전달받은 JSON을 적용한다. 스키마·테이블·컬럼·관계와 ChartDB 내부 ID는 바꾸지 않고, 테이블 배치·크기·색상과 Area·메모만 옮긴다.
-
-1. 보내는 쪽에서 대상 ERD를 열고 **작업 데이터 공유 → 작업 데이터 JSON 내보내기**를 누른다.
-2. 받는 쪽 브라우저나 컴퓨터에서 **같은 레포**를 Sync해 ERD를 연다.
-3. **작업 데이터 공유 → JSON 파일 선택**으로 항목 수와 출처를 확인한 뒤 **현재 ERD에 적용**을 누른다. 같은 레포라면 다른 브랜치·커밋에도 이름이 같은 테이블의 배치·색상을 가져올 수 있으며, 현재 작업은 먼저 자동 백업한다. 다른 레포는 적용할 수 없다.
-
-GitHub 원격·로컬 커밋·worktree, ChartDB 실행 폴더, 포트, 브라우저 프로필이 달라도 같은 레포면 수동 공유할 수 있다. 브랜치·커밋이 다르면 이름이 같은 테이블만 배치·색상을 옮기므로 새·삭제된 테이블의 배치는 바꾸지 않는다. 다른 레포는 잘못된 스키마에 배치를 적용하지 않도록 계속 차단한다. 적용 직전 상태는 서버 SQLite의 보존 한도 안에서 자동 백업되며 **직전 적용 되돌리기**로 복원할 수 있다. 자동 백업 실패는 경고하고 적용은 계속한다.
-
-이 JSON에는 메모 내용이 포함될 수 있으므로 팀에 전달하기 전에 민감 정보가 없는지 확인한다. 5 MB를 넘거나 형식·항목 수가 올바르지 않은 파일은 거부한다. 현재 버전은 JSON 파일을 이용한 수동 공유이며 GitHub나 클라우드로 자동 업로드하지 않는다.
-
-## 패널과 편집
-
-- **오른쪽 Filter Tables**: macOS에서는 `⌘F`로 열고 닫는다. 스키마·Area별로 테이블을 찾거나 눈 아이콘으로 표시 여부를 바꾼다. 처음에는 `public` 이외의 스키마가 숨겨져 있을 수 있다. 화면에서 숨기는 것은 DB 테이블 삭제가 아니다.
-- **왼쪽 Tables**: 테이블과 필드 정보를 확인한다.
-- **왼쪽 DBML**: 코드 편집기 형태로 다이어그램의 DBML을 확인한다. 오른쪽 Filter Tables와는 별도 패널이다.
-- **왼쪽 Refs**: 관계 정의를 확인한다.
-- **왼쪽 Visuals**: Area와 메모를 관리한다. 테이블을 드래그해 배치를 바꾸고 테이블·Area 색상으로 도메인을 구분할 수 있다.
-
-화면의 편집은 운영 DB나 백엔드 코드에 반영되지 않는다. Sync는 GitHub → 로컬 ERD 단방향이며, 브라우저에서 수정한 테이블·컬럼 구조는 이후 스키마 갱신 때 원본으로 덮어써질 수 있다. 이름이 같은 항목의 배치·색상 등 시각 정보는 병합해 유지한다.
-
-## 브랜치별 배치·색상은 유지되나요?
-
-**네. 같은 레포의 공통 테이블 배치·색상과 Area·메모를 브랜치 사이에 공유하며, 다시 Sync해도 유지한다. 스키마 구조만 선택한 브랜치를 따른다.**
-
-레포도 함께 구분한다. 예를 들어 A 레포의 `main`과 B 레포의 `main` 배치는 서로 영향을 주지 않는다. 기존 단일 레포에서 사용하던 ERD ID·URL은 유지하므로 기존 배치가 이어진다.
-
-- 예를 들어 `develop`에서 바꾼 공통 테이블 배치·색상은 `main` ERD를 열 때도 적용된다.
-- 새 브랜치도 이미 저장된 공통 설정을 사용한다. 특정 브랜치에만 있는 테이블의 설정은 보관했다가 해당 테이블이 다시 나타날 때 복원한다.
-- KeepERD는 **`http://localhost:18777`** 를 정식 주소로 사용한다. `127.0.0.1:18777`로 접속하면 같은 경로로 자동 이동한다. IndexedDB는 호스트명·포트마다 분리되므로, 기존 `127.0.0.1` 작업 데이터는 필요하면 **작업 데이터 공유** JSON으로 한 번 이전한다.
-- 스키마명·테이블명으로 기존 테이블을 대응하므로 이름이 바뀌면 삭제와 추가로 처리되어 기존 배치가 이어지지 않을 수 있다. 새 테이블에는 새 위치를 지정한다.
-- 저장 위치는 **로컬 서버 SQLite**이며, GitHub 포크나 백엔드 저장소에 자동으로 올라가지 않는다. 중요한 배치는 **작업 데이터 공유** JSON으로 별도 백업한다.
-
-## 저장 위치와 백업
-
-| 정보                           | 저장 위치                                     | GitHub에 자동 업로드? |
-| ------------------------------ | --------------------------------------------- | --------------------- |
-| ERD·배치·색상·Area·메모·필터   | 사용자 상태 폴더의 `keeperd.sqlite`           | 아니오                |
-| 제한된 자동 백업·반영 revision | 사용자 상태 폴더의 `keeperd.sqlite`           | 아니오                |
-| 추출한 원본 스키마 JSON        | `~/Library/Application Support/KeepERD/data/` | 아니오                |
-| 커스텀 기능 코드·문서          | ChartDB 작업 폴더                             | commit·push한 내용만  |
-
-SQLite는 Node 프로세스가 직접 관리하는 파일 저장소다. 같은 사용자 상태 폴더에 연결하면 브라우저·프로필·포트가 달라도 작업 데이터를 공유한다. 브라우저 사이트 데이터를 지워도 이미 이전한 서버 데이터는 유지된다. 이전 IndexedDB/localStorage는 원래 브라우저·프로필·주소에서 새 버전에 접속해야 읽을 수 있으며, 같은 ERD의 기존 작업은 저장된 수정 시각으로 비교해 최신 전체 편집본을 자동 반영한다. 각 원래 브라우저의 첫 접속에서 이전되며 별도 이전 작업은 필요 없다. [이전·복구 가이드](SQLITE.md)를 확인한다.
-
-macOS에서는 npm 소스 실행과 향후 Homebrew 실행이 모두 `~/Library/Application Support/KeepERD/`를 사용한다. 따라서 KeepERD 소스 checkout이나 worktree를 바꾸고 업그레이드해도 설정·스냅샷·내부 clone이 유지된다. 테스트와 자동화에서만 `KEEPERD_STATE_DIR=/absolute/path`로 격리할 수 있다.
-
-기존 checkout의 `.local-erd/`는 자동으로 합치거나 삭제하지 않는다. 서버를 종료한 뒤 아래처럼 하나씩 명시적으로 가져온다. 여러 경로를 차례로 실행하면 레포·브랜치와 로컬 경로 ID 기준으로 병합하며 원본 폴더는 그대로 둔다.
-
-```sh
-npm run local:migrate -- --from=/absolute/path/to/chartdb/.local-erd
-```
-
-배치를 보관하려면 ERD 화면의 **작업 데이터 공유 → 작업 데이터 JSON 내보내기**를 사용한다. 첫 화면의 **생성된 JSON 다운로드**는 서버가 추출한 스냅샷이므로 브라우저에서 이후에 바꾼 배치의 백업이 아니다. 자동 백업도 같은 서버 디스크에 있으므로 외부 백업을 대체하지 않는다.
-
-## 파일 위치
-
-| 경로                                                                       | 역할                                           |
-| -------------------------------------------------------------------------- | ---------------------------------------------- |
-| `tools/local-erd/server.mjs`                                               | localhost 서버, Sync API, 중복 실행 방지       |
-| `tools/local-erd/sync.mjs`                                                 | Git 입력 → 선언 스키마 우선 재현 → 스키마 JSON |
-| `tools/local-erd/introspect.sql`                                           | 테이블·컬럼·PK·FK·인덱스·CHECK 추출            |
-| `tools/local-erd/sync-ui.js`                                               | Sync 버튼·진행률·자동 새로고침                 |
-| `src/lib/local-branch-merge.ts`                                            | 기존 배치·ID를 유지하는 병합                   |
-| `src/context/storage-context/server-storage.ts`                            | 로컬 편집기의 서버 저장 API 연결               |
-| `tools/local-erd/workspace-store.mjs`                                      | SQLite ERD·레이아웃·백업·revision 관리         |
-| `~/Library/Application Support/KeepERD/keeperd.sqlite`                     | 모든 브라우저의 공통 작업 데이터               |
-| `~/Library/Application Support/KeepERD/config.json`                        | 개인 설정과 로컬 clone/worktree 등록 정보      |
-| `~/Library/Application Support/KeepERD/repositories/<repo-id>/repository/` | GitHub URL별 내부 복제본                       |
-| `~/Library/Application Support/KeepERD/data/`                              | 생성된 스키마                                  |
-| `~/Library/Application Support/KeepERD/.keeperd.lock`                      | 동시 실행으로부터 전역 상태 보호               |
-
-## 저장과 제한
-
-- 위치·색상·Area·메모는 같은 사용자 상태 폴더의 SQLite에 레포별로 공유한다. 장기 백업은 ChartDB의 JSON 내보내기를 사용한다.
-- GitHub에는 코드와 테스트만 올린다. 실제 스키마·개인 설정은 KeepERD 전역 사용자 폴더에, 빌드 결과·의존성은 Git에서 제외된 소스 checkout에 둔다.
-- 스키마명과 테이블명, 컬럼명으로 기존 항목을 대응한다. 이름 변경은 삭제와 추가로 처리한다.
-- 삭제된 테이블·컬럼·관계는 제거한다. 병합·JSON 적용 전 백업은 SQLite에 ERD별 3개·전체 128개·UTF-8 payload 합계 32 MiB까지 보관하며 오래된 백업부터 제거한다. 큰 백업이나 쓰기 실패는 경고하고 기존 ERD 읽기와 주 데이터 저장을 계속한다. 이전 IndexedDB/localStorage는 읽기 전용으로 이전하며 원본을 남긴다. 여러 브라우저의 같은 ERD는 최신 저장본을 자동 채택하고 다른 저장본은 같은 보존 한도의 복구 백업으로 남긴다.
-- 새 테이블은 기존 테이블 아래에 배치한다. 필요하면 원하는 Area로 이동한다.
-- 처음 여는 브라우저에서는 Filter Tables에서 `public` 이외 스키마의 눈 아이콘을 켜야 전체 테이블이 보일 수 있다.
-- 여러 탭·브라우저가 같은 저장 버전을 읽고 편집하면 먼저 저장한 요청만 반영한다. 오래된 요청은 409와 화면 경고로 거절하며, 추가 저장을 중지한다. 현재 화면을 ChartDB JSON으로 내보낸 뒤 새로고침한다. 실시간 화면 병합은 지원하지 않는다. 편집 내용을 Git JSON 파일에 자동 저장하지 않는다.
-- 복합 FK는 컬럼별 선으로 표시한다. 표현식·부분 인덱스의 상세 SQL은 인덱스 주석으로 보존한다. DB 배포용 SQL을 완전 복원하는 도구는 아니다.
-- 버튼 동기화 방식이며 GitHub 변경을 주기적으로 감시하지 않는다.
-- 서버는 loopback에만 바인딩하며, 브라우저는 `localhost:18777`를 정식 주소로 사용한다. 외부 Origin의 Sync 요청을 차단한다.
-
-## 검증
-
-```sh
-npm run local:test
-node --test tools/local-erd/branches.test.mjs
-node --test tools/local-erd/sync.test.mjs tools/local-erd/init.test.mjs
-npx tsc -b
-node --check tools/local-erd/server.mjs
-node --check tools/local-erd/sync.mjs
-```
-
-병합 테스트는 합성 스키마를 사용하므로 개인 DB나 비공개 스냅샷 없이 실행된다.
-
-ChartDB 원본과 동일하게 AGPL-3.0 라이선스를 따른다. 원본: https://github.com/chartdb/chartdb
-
-## 브랜치 간 작업 설정 공유
-
-같은 사용자 상태 폴더를 쓰는 서버에서 같은 레포의 ERD를 열면 공통 테이블의 배치·색상과 Area·메모가 이어집니다. 스키마는 선택한 브랜치 그대로 유지하며, 다른 브랜치에만 존재하는 테이블의 배치는 보관했다가 다시 나타날 때 복원합니다. 로컬/원격 입력과 연결된 worktree에도 같은 기준을 적용합니다.
-
-설정은 서버 SQLite의 `layouts`에 저장합니다. 이전 브라우저의 작업은 원본을 보존하며 가져오고, 초기 이전은 ERD 수정 시각을 비교해 최신 레포 공통 배치를 반영합니다. 현재 여는 ERD나 접속 순서를 우선하지 않습니다. 이전 v1 레이아웃 백업이 있으면 해당 ERD의 한 세트로 복구합니다. 직접 지정한 영역 위치·크기는 유지하며, 소속 테이블이 다른 브랜치에만 있는 영역은 숨겼다가 복원합니다. 의도적으로 만든 빈 영역은 유지합니다. 같은 서버의 다른 브라우저는 공통 저장소를 사용하며, 다른 컴퓨터는 JSON 공유를 사용합니다. 레포의 마지막 ERD를 삭제하면 해당 공통 레이아웃도 정리합니다.
-
-자세한 런타임 고정·이전·백업 한도·오프라인 복구 절차는 [SQLite 저장소 가이드](SQLITE.md)를 확인하세요.
+KeepERD is an independent, unofficial fork of [ChartDB](https://github.com/chartdb/chartdb). See [LICENSE](../../LICENSE) and [NOTICE](../../NOTICE).

@@ -1,26 +1,46 @@
-# Contributing to KeepERD
+# Develop and Contribute to KeepERD
 
-KeepERD is an independent, unofficial fork of ChartDB. We welcome improvements
-to KeepERD while retaining the upstream attribution and AGPL-3.0 obligations
-documented in [NOTICE](NOTICE).
+[Overview](README.md) · [Setup](tools/local-erd/SETUP.md) · [Usage](tools/local-erd/README.md) · [Issues](https://github.com/craftdio/keeperd/issues)
 
-## How to contribute
+Keep changes focused on KeepERD's Git schema Sync, ERD editing, local workspace storage, or CLI. For everyday use, [install with Homebrew](tools/local-erd/SETUP.md#install-with-homebrew).
 
-1. Check [KeepERD Issues](https://github.com/craftdio/keeperd/issues) for an
-   existing report or discussion, then open an issue when one does not exist.
-2. Fork this repository and create a branch from `main`.
-3. Keep each pull request focused on one change, describe the issue it solves,
-   and include tests when behavior changes.
-4. Run the relevant lint and test commands before opening the pull request.
-5. Open the pull request against this repository and address review feedback.
+## Run from source
 
-## Bugs, questions, and feature requests
+Clone the repository you intend to contribute to, create a work branch from its default branch, and enter the checkout. Use the exact Node.js version in `.nvmrc` (**26.12.1** currently). Docker is needed for schema replay; GitHub inputs also need GitHub CLI authentication.
 
-Use [KeepERD Issues](https://github.com/craftdio/keeperd/issues) for bugs,
-usage questions, and feature requests. KeepERD does not use ChartDB's official
-support email, Discord server, or contributor workflow for support.
+```sh
+nvm install
+nvm use
+npm run local:init
+npm run local:start
+```
 
-## License
+`local:init` installs dependencies and builds the Sync-enabled app. Use `npm run local:stop` to stop it from another terminal. `npm run dev` and `npm run build` retain the upstream editor workflow; use `npm run local:build` for KeepERD's repository Sync UI.
 
-By contributing, you agree that your work is licensed under the
-[GNU Affero General Public License v3.0](LICENSE).
+Homebrew users receive a private pinned Node runtime automatically. Source development uses the runtime selected in your shell. No SQLite server or PostgreSQL server installation is required; workspace storage uses built-in SQLite, and schema replay uses temporary PostgreSQL 17 containers in Docker.
+
+## Validate a change
+
+Run the checks relevant to the change. For application changes, the main checks are:
+
+```sh
+npm run lint
+npm run test:ci
+npm run local:test:cli
+npm run local:build
+```
+
+`npm run local:test` runs the focused local-ERD UI and layout tests. Schema runner changes also need replay tests against the supported input and pinned images. Use synthetic schemas and a separate `KEEPERD_STATE_DIR` for tests that touch workspace data.
+
+## Open a pull request
+
+1. Check this repository's issues and describe the problem or intended behavior.
+2. Keep the change focused and add regression coverage when behavior changes.
+3. Explain the resulting behavior and relevant verification in the pull request.
+4. Target this repository's default branch and address review feedback.
+
+Report bugs, usage questions, and feature requests in [KeepERD Issues](https://github.com/craftdio/keeperd/issues). For release and formula updates, see the [setup guide's maintainer notes](tools/local-erd/SETUP.md) and [Homebrew maintainer guide](https://github.com/craftdio/homebrew-keeperd#maintainers).
+
+## Attribution and license
+
+KeepERD is an independent, unofficial fork of [ChartDB](https://github.com/chartdb/chartdb), with no affiliation or endorsement. Preserve upstream notices and the [GNU AGPL v3 license](LICENSE). Contributions are distributed under that license; see [NOTICE](NOTICE).

@@ -1,41 +1,64 @@
-# KeepERD
+<p align="center">
+  <b>A local ERD workspace for your Git branches.</b>
+</p>
 
-KeepERD는 Git repository의 브랜치별 PostgreSQL 스키마를 로컬에서 동기화해
-ERD로 확인하고 비교하는 도구입니다. 브랜치의 스키마 구조는 선택한 Git
-입력을 따르고, 같은 repository의 테이블 배치·색상·Area·메모는 브랜치 사이에
-계속 유지합니다.
+<h5 align="center">
+  <a href="tools/local-erd/SETUP.md#install-with-homebrew">Install</a> &bull;
+  <a href="tools/local-erd/README.md#sync-a-repository">Sync</a> &bull;
+  <a href="tools/local-erd/README.md#share-layouts">Share</a> &bull;
+  <a href="tools/local-erd/SQLITE.md#backup-and-restore">Backups</a> &bull;
+  <a href="CONTRIBUTING.md">Contribute</a>
+</h5>
 
-> KeepERD는 ChartDB를 기반으로 만든 독립적인 비공식 포크입니다. ChartDB와
-> 제휴하거나 보증을 받지 않습니다.
+---
 
-## Why KeepERD
+<h1 align="center">
+  <img src="./docs/assets/keeperd-banner.png" width="760" alt="KeepERD — dark banner with an icy-blue geometric symbol and off-white wordmark">
+</h1>
 
-스키마 변경을 코드와 함께 관리하는 프로젝트에서 브랜치를 전환할 때마다 ERD를
-다시 만들 필요 없이, 해당 브랜치의 SQL을 동기화해 현재 구조와 변경점을 볼 수
-있습니다. GitHub 원격 repository뿐 아니라 아직 push하지 않은 로컬 clone과
-worktree의 커밋·작업 중 변경도 별도 입력으로 확인할 수 있습니다.
+<p align="center">
+  <b>Switch branches. Keep your layout.</b><br>
+  Explore schema changes. Keep your ERD organized.
+</p>
 
-## 현재 지원 기능
+<h3 align="center">
+  <a href="#how-to-get-started">Quick Start</a> &bull;
+  <a href="tools/local-erd/README.md">Guide</a> &bull;
+  <a href="https://github.com/craftdio/keeperd/issues">Issues</a>
+</h3>
 
-- GitHub 계정·조직에서 repository와 branch를 골라 스키마 Sync
-- 로컬 clone/worktree를 등록해 push 전 branch commit 또는 작업 중 SQL 확인
-- PostgreSQL 17 기준 `db/schema/*.sql`을 우선 사용하고, 없으면
-  `db/migration/*.sql`을 순서대로 재현
-- branch의 공통 조상과 비교해 추가·변경된 테이블과 필드를 ERD에서 표시
-- 같은 repository의 테이블 배치·크기·색상, Area, 메모를 branch 간에 보존
-- 서버 SQLite에 ERD 작업을 저장해 같은 서버의 브라우저·프로필 사이에 공유
-- 기존 브라우저 데이터를 자동 이전하고 다른 컴퓨터에는 작업 데이터 JSON으로 공유
+<p align="center">
+  <a href="https://github.com/craftdio/homebrew-keeperd"><img src="https://img.shields.io/badge/Install-Homebrew-91BEC9?logo=homebrew&amp;logoColor=white&amp;labelColor=161B22" alt="Install with Homebrew"></a>
+  <a href=".nvmrc"><img src="https://img.shields.io/badge/Runtime-Node.js%2026.12.1-91BEC9?logo=nodedotjs&amp;logoColor=white&amp;labelColor=161B22" alt="Node.js 26.12.1 runtime, installed automatically by Homebrew"></a>
+  <a href="tools/local-erd/README.md#supported-schema-inputs"><img src="https://img.shields.io/badge/Schema%20Replay-PostgreSQL%2017-91BEC9?logo=postgresql&amp;logoColor=white&amp;labelColor=161B22" alt="PostgreSQL 17 schema replay in Docker"></a>
+  <a href="tools/local-erd/SQLITE.md"><img src="https://img.shields.io/badge/Storage-SQLite-91BEC9?labelColor=161B22" alt="Workspace stored locally in SQLite"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-91BEC9?labelColor=161B22" alt="GNU AGPL version 3"></a>
+</p>
 
-Sync한 스키마와 개인 설정은 로컬에 저장되며 GitHub로 자동 업로드하지 않습니다.
+---
 
-## 시작하기
+<a id="features"></a>
 
-### Homebrew로 설치
+## 🧱 KeepERD
 
-일반 사용자는 [공개 Homebrew tap](https://github.com/craftdio/homebrew-keeperd)을
-통한 설치를 권장합니다. Formula가 정확한 Node **26.12.1**을 KeepERD 전용 디렉터리에 설치하고 Git, GitHub CLI(`gh`)도 준비합니다. 시스템 Node는 교체하지 않습니다.
-스키마 재현 기능을 사용하려면 Formula에 포함되지 않는 Docker Desktop 또는 Docker
-호환 런타임을 별도로 설치하고 실행해야 합니다.
+Turn versioned schemas into ERDs. Sync GitHub or local branches, compare changes, and keep your layout. Workspace data stays on your computer in SQLite. See [supported schema inputs](tools/local-erd/README.md#supported-schema-inputs).
+
+### What you can do
+
+| Feature           | What it does                                                           |
+| ----------------- | ---------------------------------------------------------------------- |
+| Branch Sync       | Build an ERD from versioned schema files.                              |
+| Local Changes     | Inspect unpushed commits and working schema SQL.                       |
+| Schema Diff       | Highlight added or changed tables and fields.                          |
+| Persistent Layout | Keep table positions, sizes, colors, Areas, and notes across branches. |
+| Local Storage     | Share one local workspace across browsers and profiles.                |
+| Layout Sharing    | Share table layouts, Areas, and notes within the same repository.      |
+
+<a id="how-to-get-started"></a>
+
+## 🏃🏻 Getting Started
+
+Install [Homebrew](https://brew.sh), then install and start a Docker-compatible runtime for schema replay.
 
 ```sh
 brew tap craftdio/keeperd
@@ -44,89 +67,27 @@ keeperd init
 keeperd start
 ```
 
-브라우저에서 [http://localhost:18777/](http://localhost:18777/)을 열고,
-**조직/계정 → repository → branch → Sync** 순서로 선택하세요. `127.0.0.1`으로
-접속하면 KeepERD가 정식 주소인 `localhost`로 이동합니다.
+Open the address printed in your terminal, select a repository and branch, then **Sync**.
+For GitHub repositories, run `gh auth login` and `gh auth setup-git` first. Local repositories need no GitHub login.
 
-GitHub 원격 repository를 사용할 때만 GitHub CLI 로그인이 필요할 수 있습니다.
-로컬 clone/worktree만 입력할 때는 GitHub 로그인이 필요 없습니다.
+### 🤸‍♂️ Upgrade
 
 ```sh
-gh auth login --hostname github.com --git-protocol https --web
-gh auth setup-git
+keeperd stop
+brew update
+brew upgrade keeperd
+keeperd start
 ```
 
-### 소스 checkout에서 실행
+Homebrew supplies the app runtime and CLI dependencies. For authentication and local repositories, see the [setup guide](tools/local-erd/SETUP.md).
 
-개발, 기여, 수동 소스 기반 실행에는 source checkout을 사용하세요. Node.js **26.12.1**, Git, Docker가 필요합니다.
+<p align="center">
+  <a href="tools/local-erd/README.md">Usage Guide</a> &bull;
+  <a href="tools/local-erd/SETUP.md#troubleshooting">Troubleshooting</a> &bull;
+  <a href="CONTRIBUTING.md">Contribute</a>
+</p>
 
-```sh
-git clone https://github.com/craftdio/keeperd.git
-cd keeperd
-nvm install
-nvm use
-npm run local:init
-npm run local:start
-```
-
-`npm run local:init`은 필요한 의존성 설치와 첫 로컬 build를 처리합니다. 이후에는
-`npm run local:start`만 실행하면 됩니다. source checkout에서도 GitHub 원격
-repository를 사용할 때만 `gh` 로그인하면 됩니다.
-
-## Repository Sync
-
-- **GitHub 원격 입력**: `gh auth login` 후 화면에서 repository와 branch를
-  선택합니다. 인증 토큰은 브라우저에 전달하지 않습니다.
-- **로컬 입력**: 화면에서 서버 컴퓨터의 clone/worktree 절대 경로를 등록합니다.
-  push하지 않은 commit을 읽을 수 있으며, 현재 checkout에서는 staged·unstaged·
-  미추적 스키마 SQL을 포함해 확인할 수 있습니다.
-- **ERD 작업 데이터**: ERD·배치·색상·Area·메모·필터는 사용자 상태 폴더의
-  `keeperd.sqlite`에 저장됩니다. 기존 각 브라우저의 첫 접속에서 데이터를 자동
-  이전하며, 같은 ERD는 저장 시각이 최신인 전체 저장본을 선택합니다. 원본과
-  제한된 복구 백업은 보존합니다. [이전·복구 가이드](tools/local-erd/SQLITE.md)를
-  확인하세요. 다른 컴퓨터에는 **작업 데이터 공유** JSON을 사용하세요.
-
-원격·로컬 입력의 차이, 스키마 파일 경로, Sync 실패 시 기존 ERD 보존 방식 등은
-[KeepERD 기능 가이드](tools/local-erd/README.md)에서 확인할 수 있습니다.
-
-## 문서
-
-- [설치·실행 가이드](tools/local-erd/SETUP.md): 준비물, GitHub 인증, 로컬
-  repository/worktree, 데이터 이전, 업데이트, Release 절차
-- [KeepERD 기능 가이드](tools/local-erd/README.md): Sync 동작, branch 비교,
-  저장·백업, layout 공유, 관리 화면
-- [Contributing guide](CONTRIBUTING.md): 이 repository에 기여하는 방법
-- [KeepERD Issues](https://github.com/craftdio/keeperd/issues): 버그, 질문,
-  기능 요청
-
-## Development
-
-소스 checkout에서 개발할 때는 아래 명령을 사용합니다.
-
-```sh
-npm ci
-npm run local:init
-npm run local:start
-```
-
-주요 검증 명령은 다음과 같습니다.
-
-```sh
-npm run lint
-npm run local:test:cli
-npm run local:build
-```
-
-기존 ChartDB editor 개발 흐름인 `npm run dev`와 `npm run build`도 유지됩니다.
-KeepERD의 repository Sync UI는 `local:init` 또는 `local:build`가 만드는 로컬
-build에서 활성화됩니다.
-
-## Upstream & License
-
-KeepERD is an independent, unofficial fork based on
-[ChartDB](https://github.com/chartdb/chartdb). It is not affiliated with or
-endorsed by ChartDB.
-
-KeepERD와 원본 ChartDB의 저작권·라이선스 고지는
-[GNU Affero General Public License v3.0](LICENSE)를 따릅니다. 원본 출처,
-KeepERD 수정 소스, 필요한 attribution은 [NOTICE](NOTICE)에 명시되어 있습니다.
+<p align="center">
+  <sub>KeepERD is an independent, unofficial fork of <a href="https://github.com/chartdb/chartdb">ChartDB</a>, with no affiliation or endorsement.<br>
+  Licensed under <a href="LICENSE">GNU AGPL v3</a>. See <a href="NOTICE">NOTICE</a> for source and attribution details.</sub>
+</p>
