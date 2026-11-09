@@ -2,6 +2,17 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
+import {
+    chmodSync,
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commandScript, commands } from './keeperd.mjs';
 import { readKeeperdVersion } from '../tools/local-erd/keeperd-version.mjs';
@@ -64,4 +75,44 @@ test('keeperd rejects an unknown command without launching a script', () => {
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Unknown keeperd command: unsupported/);
     assert.match(result.stderr, /keeperd <command> \[options\]/);
+});
+
+test('version, help and invalid commands never invoke Git or GitHub authentication', (t) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'keeperd-cli-auth-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const bin = path.join(root, 'bin');
+    mkdirSync(bin);
+    const trace = path.join(root, 'auth-trace');
+    for (const command of ['git', 'gh', 'git-credential-osxkeychain']) {
+        const file = path.join(bin, command);
+        writeFileSync(
+            file,
+            '#!/bin/sh\necho invoked >> "$KEEPERD_AUTH_TRACE"\nexit 91\n'
+        );
+        chmodSync(file, 0o755);
+    }
+    for (const [argument, status] of [
+        ['--version', 0],
+        ['-v', 0],
+        ['--help', 0],
+        ['version', 1],
+    ]) {
+        const result = spawnSync(process.execPath, [cli, argument], {
+            env: {
+                PATH: bin,
+                HOME: root,
+                KEEPERD_STATE_DIR: path.join(root, 'state'),
+                KEEPERD_AUTH_TRACE: trace,
+            },
+            encoding: 'utf8',
+            timeout: 5000,
+        });
+        assert.equal(result.status, status, result.stderr);
+    }
+    assert.equal(
+        existsSync(trace),
+        false,
+        existsSync(trace) ? readFileSync(trace, 'utf8') : ''
+    );
+    assert.equal(existsSync(path.join(root, 'state')), false);
 });
