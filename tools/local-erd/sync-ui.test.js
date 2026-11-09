@@ -769,7 +769,7 @@ it('opens the work data sharing panel with the current repo, branch and commit',
         vi.fn(async (path) => {
             if (path === '/api/context')
                 return response({ primaryUrl: repositoryUrl });
-            if (path === '/api/workspace')
+            if (path.startsWith('/api/workspace'))
                 return response({
                     revision: 1,
                     diagrams: [{ id: 'debut-main', tables: [] }],
@@ -860,7 +860,7 @@ async function sharingPanel() {
                     },
                 ],
             });
-        if (path === '/api/workspace') return response(state);
+        if (path.startsWith('/api/workspace')) return response(state);
         if (path.startsWith('/api/branches'))
             return response({ branches: ['main'] });
         return response({ status: 'idle' });

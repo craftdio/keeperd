@@ -39,6 +39,7 @@ test(
                 'node-runtime.mjs',
                 'workspace-store.mjs',
                 'layout-package.js',
+                'workspace-selection.js',
                 'layout-table-picker.js',
                 'branches.mjs',
                 'folder-picker.mjs',
@@ -127,6 +128,7 @@ test(
             for (const file of [
                 'layout-package.js',
                 'layout-table-picker.js',
+                'workspace-selection.js',
             ]) {
                 const response = await fetch(`${base}/${file}`);
                 assert.equal(response.status, 200);
@@ -147,6 +149,23 @@ test(
             const workspaceResponse = await fetch(`${base}/api/workspace`);
             assert.equal(workspaceResponse.status, 200);
             const firstWorkspace = await workspaceResponse.json();
+            const configSelection = await fetch(
+                `${base}/api/workspace?selection=${encodeURIComponent(JSON.stringify({ kind: 'config' }))}`
+            );
+            assert.equal(configSelection.status, 200);
+            const selectedConfig = await configSelection.json();
+            assert.equal(selectedConfig.kind, 'selection-v1');
+            assert.equal(selectedConfig.revision, firstWorkspace.revision);
+            assert.deepEqual(selectedConfig.value, firstWorkspace.config);
+            assert.equal(
+                (await fetch(`${base}/api/workspace?selection=not-json`))
+                    .status,
+                400
+            );
+            assert.equal(
+                (await fetch(`${base}/api/workspace?selection=null`)).status,
+                400
+            );
             const workspaceDiagram = {
                 id: 'workspace-test',
                 name: 'SQLite ERD',
@@ -172,6 +191,27 @@ test(
                 (await saveWorkspace(firstWorkspace.revision)).status,
                 200
             );
+            const latestRevision = (
+                await (await fetch(`${base}/api/workspace`)).json()
+            ).revision;
+            const receiptResponse = await fetch(`${base}/api/workspace`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Local-ERD': 'sync',
+                },
+                body: JSON.stringify({
+                    revision: latestRevision,
+                    response: 'ack-v1',
+                    action: 'updateConfig',
+                    params: { theme: 'dark' },
+                }),
+            });
+            assert.equal(receiptResponse.status, 200);
+            assert.deepEqual(await receiptResponse.json(), {
+                kind: 'ack-v1',
+                revision: latestRevision + 1,
+            });
             assert.equal(
                 (await saveWorkspace(firstWorkspace.revision)).status,
                 409

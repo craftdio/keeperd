@@ -613,9 +613,26 @@ const server = createServer(async (req, res) => {
                     let payload;
                     if (req.method === 'GET') {
                         const backupId = url.searchParams.get('backup');
+                        let selection;
+                        if (url.searchParams.has('selection')) {
+                            const raw = url.searchParams.get('selection');
+                            if (raw.length > 4096)
+                                throw new WorkspaceError(
+                                    'INVALID_SELECTION',
+                                    '읽기 범위가 너무 큽니다.'
+                                );
+                            try {
+                                selection = JSON.parse(raw);
+                            } catch {
+                                throw new WorkspaceError(
+                                    'INVALID_SELECTION',
+                                    '읽기 범위 JSON을 확인하세요.'
+                                );
+                            }
+                        }
                         payload = backupId
                             ? { value: store.readBackup(Number(backupId)) }
-                            : store.view();
+                            : store.view(selection);
                         if (importWarning) payload.warning = importWarning;
                     } else if (req.method === 'POST') {
                         if (req.headers['x-local-erd'] !== 'sync') {
@@ -936,6 +953,7 @@ const server = createServer(async (req, res) => {
                 '/library.js',
                 '/browser-store.js',
                 '/workspace-client.js',
+                '/workspace-selection.js',
                 '/browser-migration.js',
                 '/layout-transfer.js',
                 '/layout-package.js',

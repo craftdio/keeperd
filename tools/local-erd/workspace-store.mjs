@@ -4,6 +4,10 @@ import { mkdirSync, chmodSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import {
+    normalizeWorkspaceSelection,
+    selectDiagramValue,
+} from './workspace-selection.js';
+import {
     isPartialLayoutPackage,
     layoutPosition,
     parseLayoutPackage,
@@ -264,33 +268,86 @@ export function openWorkspace(
             );
         }
     };
-    const view = () => ({
-        revision: revision(),
-        diagrams: db
-            .prepare('SELECT id FROM diagrams ORDER BY rowid')
-            .all()
-            .map(({ id }) => current(id)),
-        layouts: db.prepare('SELECT body FROM layouts').all().map(parse),
-        filters: Object.fromEntries(
-            db
-                .prepare('SELECT * FROM filters')
-                .all()
-                .map((item) => [item.id, parse(item)])
-        ),
-        config: parse(
-            db.prepare("SELECT body FROM meta WHERE key='config'").get()
-        ) ?? {
+    const readConfig = () =>
+        parse(db.prepare("SELECT body FROM meta WHERE key='config'").get()) ?? {
             defaultDiagramId:
                 db.prepare('SELECT id FROM diagrams LIMIT 1').get()?.id ?? '',
-        },
-        backups: db
-            .prepare(
-                'SELECT id,diagram_id AS diagramId,kind,bytes FROM backups ORDER BY id DESC'
-            )
-            .all(),
-        backupPolicy: policy,
-        ...(backupWarning ? { warning: backupWarning } : {}),
-    });
+        };
+    const view = (selection) => {
+        if (selection !== undefined) {
+            let scope;
+            try {
+                scope = normalizeWorkspaceSelection(selection);
+            } catch (error) {
+                fail(error.message);
+            }
+            let value;
+            if (scope.kind === 'config') value = readConfig();
+            else if (scope.kind === 'filter')
+                value = parse(
+                    db
+                        .prepare('SELECT body FROM filters WHERE id=?')
+                        .get(scope.diagramId)
+                );
+            else if (scope.kind === 'diagrams') {
+                if (!scope.includes.length) {
+                    // Drop schema collections inside SQLite, before allocating
+                    // their JSON objects in Node for the diagram list.
+                    value = db
+                        .prepare(
+                            "SELECT json_remove(body, '$.tables', '$.relationships', '$.dependencies', '$.areas', '$.customTypes', '$.notes') AS body FROM diagrams ORDER BY rowid"
+                        )
+                        .all()
+                        .map(parse);
+                } else
+                    value = db
+                        .prepare('SELECT id FROM diagrams ORDER BY rowid')
+                        .all()
+                        .map(({ id }) =>
+                            selectDiagramValue(current(id), scope.includes)
+                        );
+            } else {
+                const diagram = current(scope.diagramId);
+                if (scope.kind === 'diagram')
+                    value = selectDiagramValue(diagram, scope.includes);
+                else {
+                    const rows = diagram?.[scope.collection] ?? [];
+                    value =
+                        scope.kind === 'collection'
+                            ? rows
+                            : rows.find((item) => item.id === scope.id);
+                }
+            }
+            return {
+                kind: 'selection-v1',
+                revision: revision(),
+                value,
+                ...(backupWarning ? { warning: backupWarning } : {}),
+            };
+        }
+        return {
+            revision: revision(),
+            diagrams: db
+                .prepare('SELECT id FROM diagrams ORDER BY rowid')
+                .all()
+                .map(({ id }) => current(id)),
+            layouts: db.prepare('SELECT body FROM layouts').all().map(parse),
+            filters: Object.fromEntries(
+                db
+                    .prepare('SELECT * FROM filters')
+                    .all()
+                    .map((item) => [item.id, parse(item)])
+            ),
+            config: readConfig(),
+            backups: db
+                .prepare(
+                    'SELECT id,diagram_id AS diagramId,kind,bytes FROM backups ORDER BY id DESC'
+                )
+                .all(),
+            backupPolicy: policy,
+            ...(backupWarning ? { warning: backupWarning } : {}),
+        };
+    };
     function checkRevision(expected) {
         if (!Number.isSafeInteger(expected) || expected !== revision())
             throw new WorkspaceError(
@@ -806,7 +863,13 @@ export function openWorkspace(
                 changed = true;
             }
             if (changed) bump();
-            return view();
+            return input.response === 'ack-v1'
+                ? {
+                      kind: 'ack-v1',
+                      revision: revision(),
+                      ...(backupWarning ? { warning: backupWarning } : {}),
+                  }
+                : view();
         });
     }
     try {

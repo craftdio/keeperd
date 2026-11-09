@@ -155,6 +155,7 @@ test('serves the management page without GitHub auth and protects deletion APIs'
         'node-runtime.mjs',
         'workspace-store.mjs',
         'layout-package.js',
+        'workspace-selection.js',
         'open-browser.mjs',
     ])
         await copyFile(path.join(source, name), path.join(root, name));

@@ -27,14 +27,14 @@ const revive = (value: unknown): unknown => {
         );
     return value;
 };
-function select(diagram: Diagram, options: Options = {}): Diagram {
-    const selected = { ...diagram };
-    for (const [type, collection] of Object.entries(collections)) {
-        const key =
-            `include${type === 'CustomType' ? 'CustomTypes' : type === 'Dependency' ? 'Dependencies' : `${type}s`}` as keyof NonNullable<Options>;
-        if (!options[key]) delete selected[collection];
-    }
-    return revive(selected) as Diagram;
+function includedCollections(options: Options = {}) {
+    return Object.entries(collections)
+        .filter(([type]) => {
+            const key =
+                `include${type === 'CustomType' ? 'CustomTypes' : type === 'Dependency' ? 'Dependencies' : `${type}s`}` as keyof NonNullable<Options>;
+            return options[key];
+        })
+        .map(([, collection]) => collection);
 }
 export function createServerStorage(): StorageContext {
     const methods: Record<string, (...args: never[]) => Promise<unknown>> = {};
@@ -42,10 +42,10 @@ export function createServerStorage(): StorageContext {
         await writeWorkspace(action, params);
     };
     Object.assign(methods, {
-        getConfig: async () => (await readWorkspace()).config,
+        getConfig: async () => readWorkspace({ selection: { kind: 'config' } }),
         updateConfig: (config: unknown) => put('updateConfig', config),
         getDiagramFilter: async (id: string) =>
-            (await readWorkspace()).filters[id],
+            readWorkspace({ selection: { kind: 'filter', diagramId: id } }),
         updateDiagramFilter: (diagramId: string, filter: unknown) =>
             put('updateDiagramFilter', { diagramId, filter }),
         deleteDiagramFilter: (diagramId: string) =>
@@ -58,14 +58,24 @@ export function createServerStorage(): StorageContext {
             }),
         addDiagram: (params: unknown) => put('addDiagram', params),
         listDiagrams: async (options: Options) =>
-            (await readWorkspace()).diagrams.map((diagram) =>
-                select(diagram, options)
+            revive(
+                await readWorkspace({
+                    selection: {
+                        kind: 'diagrams',
+                        includes: includedCollections(options),
+                    },
+                })
             ),
         getDiagram: async (id: string, options: Options) => {
-            const diagram = (await readWorkspace()).diagrams.find(
-                (diagram) => diagram.id === id
+            return revive(
+                await readWorkspace({
+                    selection: {
+                        kind: 'diagram',
+                        diagramId: id,
+                        includes: includedCollections(options),
+                    },
+                })
             );
-            return diagram ? select(diagram, options) : undefined;
         },
         updateDiagram: (params: unknown) => put('updateDiagram', params),
         deleteDiagram: (id: string) => put('deleteDiagram', { id }),
@@ -83,9 +93,13 @@ export function createServerStorage(): StorageContext {
         ) => Promise<void>;
         methods[`list${plural}`] = (async (id: string) =>
             revive(
-                (await readWorkspace()).diagrams.find(
-                    (diagram) => diagram.id === id
-                )?.[collection] ?? []
+                await readWorkspace({
+                    selection: {
+                        kind: 'collection',
+                        diagramId: id,
+                        collection,
+                    },
+                })
             )) as (...args: never[]) => Promise<unknown>;
         methods[`get${type}`] = (async ({
             diagramId,
@@ -95,9 +109,9 @@ export function createServerStorage(): StorageContext {
             id: string;
         }) =>
             revive(
-                (await readWorkspace()).diagrams
-                    .find((diagram) => diagram.id === diagramId)
-                    ?.[collection]?.find((row) => row.id === id)
+                await readWorkspace({
+                    selection: { kind: 'entity', diagramId, collection, id },
+                })
             )) as (...args: never[]) => Promise<unknown>;
     }
     return methods as unknown as StorageContext;
