@@ -210,6 +210,7 @@ function refCommits(repo, prefix) {
     const lines = git(
         repo.path,
         'for-each-ref',
+        '--sort=-committerdate',
         '--format=%(refname) %(objectname)',
         prefix
     )
@@ -223,7 +224,7 @@ function refCommits(repo, prefix) {
     return commits;
 }
 
-function commonBase(repo, branch, branches) {
+function commonBase(repo, branch, branches, graph) {
     const candidates = ['develop', 'main'].filter(
         (candidate) => candidate !== branch
     );
@@ -232,22 +233,39 @@ function commonBase(repo, branch, branches) {
         try {
             const remoteRef = `refs/remotes/origin/${candidate}`;
             let candidateRef;
-            try {
-                git(
-                    repo.path,
-                    'rev-parse',
-                    '--verify',
-                    `${remoteRef}^{commit}`
-                );
-                candidateRef = remoteRef;
-            } catch {
-                if (!branches.includes(candidate)) continue;
-                candidateRef = `refs/heads/${candidate}`;
+            if (graph) {
+                candidateRef =
+                    graph.remote.get(remoteRef) ??
+                    graph.local.get(`refs/heads/${candidate}`);
+                if (!candidateRef) continue;
+            } else
+                try {
+                    git(
+                        repo.path,
+                        'rev-parse',
+                        '--verify',
+                        `${remoteRef}^{commit}`
+                    );
+                    candidateRef = remoteRef;
+                } catch {
+                    if (!branches.includes(candidate)) continue;
+                    candidateRef = `refs/heads/${candidate}`;
+                }
+            const branchRef =
+                graph?.local.get(`refs/heads/${branch}`) ??
+                `refs/heads/${branch}`;
+            const pair = `${branchRef}:${candidateRef}`;
+            if (graph?.bases.has(pair)) {
+                const cached = graph.bases.get(pair);
+                if (cached) matches.push({ branch: candidate, ...cached });
+                continue;
             }
+            // Cache failures too: many refs can share the same unrelated tips.
+            graph?.bases.set(pair, null);
             const commit = git(
                 repo.path,
                 'merge-base',
-                `refs/heads/${branch}`,
+                branchRef,
                 candidateRef
             ).trim();
             const distance = Number(
@@ -255,10 +273,11 @@ function commonBase(repo, branch, branches) {
                     repo.path,
                     'rev-list',
                     '--count',
-                    `${commit}..refs/heads/${branch}`
+                    `${commit}..${branchRef}`
                 ).trim()
             );
             matches.push({ branch: candidate, commit, distance });
+            graph?.bases.set(pair, { commit, distance });
         } catch {
             /* Unrelated histories have no useful common base label. */
         }
@@ -279,10 +298,30 @@ export function localComparisonBase(repo, branch) {
 }
 
 export function localBranchDetails(repo) {
-    const { branches, current } = localBranches(repo);
-    const worktrees = branchWorktrees(repo);
     const localCommits = refCommits(repo, 'refs/heads');
     const remoteCommits = refCommits(repo, 'refs/remotes/origin');
+    const branches = [...localCommits.keys()].map((ref) =>
+        ref.slice('refs/heads/'.length)
+    );
+    let current = '';
+    try {
+        current = git(
+            repo.path,
+            'symbolic-ref',
+            '--quiet',
+            '--short',
+            'HEAD'
+        ).trim();
+    } catch {
+        /* Detached HEAD. */
+    }
+    const worktrees = branchWorktrees(repo);
+    const graph = {
+        local: localCommits,
+        remote: remoteCommits,
+        bases: new Map(),
+    };
+    const relations = new Map();
     return {
         current,
         remoteBasis: 'local-tracking',
@@ -290,14 +329,20 @@ export function localBranchDetails(repo) {
             const commit = localCommits.get(`refs/heads/${name}`) ?? '';
             const remoteCommit =
                 remoteCommits.get(`refs/remotes/origin/${name}`) ?? '';
-            const relation = relationToRemote(repo, commit, remoteCommit);
+            const pair = `${commit}:${remoteCommit}`;
+            if (!relations.has(pair))
+                relations.set(
+                    pair,
+                    relationToRemote(repo, commit, remoteCommit)
+                );
+            const relation = relations.get(pair);
             const worktree = worktrees.get(name) ?? {
                 worktreePath: null,
                 hasWorkingChanges: false,
             };
             const base =
                 relation.remoteStatus !== 'same' || worktree.hasWorkingChanges
-                    ? commonBase(repo, name, branches)
+                    ? commonBase(repo, name, branches, graph)
                     : null;
             return {
                 name,
