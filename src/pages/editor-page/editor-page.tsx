@@ -1,9 +1,7 @@
-import React, { Suspense, useEffect } from 'react';
+import React, { Suspense } from 'react';
 import { useChartDB } from '@/hooks/use-chartdb';
-import { useDialog } from '@/hooks/use-dialog';
 import { Toaster } from '@/components/toast/toaster';
 import { useBreakpoint } from '@/hooks/use-breakpoint';
-import { useLocalConfig } from '@/hooks/use-local-config';
 import { FullScreenLoaderProvider } from '@/context/full-screen-spinner-context/full-screen-spinner-provider';
 import { LayoutProvider } from '@/context/layout-context/layout-provider';
 import { LocalConfigProvider } from '@/context/local-config-context/local-config-provider';
@@ -26,9 +24,6 @@ import { DiffProvider } from '@/context/diff-context/diff-provider';
 import { TopNavbarMock } from './top-navbar/top-navbar-mock';
 import { DiagramFilterProvider } from '@/context/diagram-filter-context/diagram-filter-provider';
 
-const OPEN_STAR_US_AFTER_SECONDS = 30;
-const SHOW_STAR_US_AGAIN_AFTER_DAYS = 1;
-
 export const EditorDesktopLayoutLazy = React.lazy(
     () => import('./editor-desktop-layout')
 );
@@ -38,33 +33,9 @@ export const EditorMobileLayoutLazy = React.lazy(
 );
 
 const EditorPageComponent: React.FC = () => {
-    const { diagramName, currentDiagram } = useChartDB();
-    const { openStarUsDialog } = useDialog();
+    const { diagramName } = useChartDB();
     const { isMd: isDesktop } = useBreakpoint('md');
-    const { starUsDialogLastOpen, setStarUsDialogLastOpen, githubRepoOpened } =
-        useLocalConfig();
     const { initialDiagram } = useDiagramLoader();
-
-    useEffect(() => {
-        if (!currentDiagram?.id || githubRepoOpened) {
-            return;
-        }
-
-        if (
-            new Date().getTime() - starUsDialogLastOpen >
-            1000 * 60 * 60 * 24 * SHOW_STAR_US_AGAIN_AFTER_DAYS
-        ) {
-            const lastOpen = new Date().getTime();
-            setStarUsDialogLastOpen(lastOpen);
-            setTimeout(openStarUsDialog, OPEN_STAR_US_AFTER_SECONDS * 1000);
-        }
-    }, [
-        currentDiagram?.id,
-        githubRepoOpened,
-        openStarUsDialog,
-        setStarUsDialogLastOpen,
-        starUsDialogLastOpen,
-    ]);
 
     return (
         <>
