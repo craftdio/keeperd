@@ -25,7 +25,7 @@ Browsers and profiles connected to a server using the same directory read the sa
 
 ### Share or move a layout
 
-Use the editor's workspace-sharing action to export layout JSON. Import it into an ERD from the same repository; matching tables can receive layouts across different branches and commits. See [layout sharing](README.md#share-layouts).
+Use the editor's workspace-sharing action to export layout JSON. Import it into an ERD from the same repository; matching tables can receive layouts across different branches and commits. Use the selected-table format when you only want to transfer specific table placements. See [layout sharing](README.md#share-layouts).
 
 For a full edited diagram, use the editor's diagram JSON export.
 
@@ -44,6 +44,7 @@ Backups are attempted before Sync replaces a schema or a full diagram/layout imp
 - Up to **3 backups per ERD**, **128 overall**, and **32 MiB of UTF-8 backup payload**.
 - Older backups are removed when limits are exceeded. Oversized individual backups are skipped with a warning.
 - A regular backup failure warns and can allow the main change to continue. A main workspace write failure rolls back the save.
+- Selected-table layout import requires a successful pre-change backup; otherwise the import is rolled back. Undo restores only the affected tables' placements and does not recreate deleted tables.
 
 These backups are bounded recovery data on the same disk. Keep separate exported files or directory backups for long-term recovery. Payload limits do not describe the SQLite file's actual disk size.
 
@@ -58,7 +59,7 @@ If migration fails, existing server work remains available and migration is retr
 <details>
 <summary>Runtime and storage internals</summary>
 
-The CLI and server require **Node.js 26.12.1**, which includes SQLite **3.54.0**, matching `.nvmrc`, `.node-version`, and `package.json`. Homebrew installs this runtime privately and launches KeepERD with it; you do not install Node yourself. The formula verifies the bundled runtime and SQLite persistence. Source developers must use the pinned version.
+The CLI and server require **Node.js 26.12.1**, matching `.nvmrc`, `.node-version`, and `package.json`. Homebrew installs this runtime privately and launches KeepERD with it; you do not install Node yourself. The formula verifies the bundled runtime and SQLite persistence. Source developers must use the pinned version.
 
 Storage uses Node's built-in `node:sqlite`, WAL, `synchronous=FULL`, and revision checks. Browser requests go through the local `/api/workspace` endpoint. Other ChartDB web builds retain their IndexedDB storage behavior. SQLite is not served as a static download.
 

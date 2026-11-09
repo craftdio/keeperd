@@ -142,6 +142,8 @@ test('serves the management page without GitHub auth and protects deletion APIs'
         'folder-picker.mjs',
         'library-store.mjs',
         'local-source.mjs',
+        'local-branches.mjs',
+        'local-branches-worker.mjs',
         'schema-replay.mjs',
         'sync-errors.mjs',
         'git-credentials.mjs',
@@ -154,6 +156,8 @@ test('serves the management page without GitHub auth and protects deletion APIs'
         'node-command.mjs',
         'node-runtime.mjs',
         'workspace-store.mjs',
+        'layout-package.js',
+        'workspace-selection.js',
         'open-browser.mjs',
     ])
         await copyFile(path.join(source, name), path.join(root, name));

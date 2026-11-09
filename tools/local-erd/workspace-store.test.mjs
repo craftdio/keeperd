@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openWorkspace } from './workspace-store.mjs';
+import { tablePlacement } from './layout-package.js';
 const diagram = (id = 'debut-main', x = 100) => ({
     id,
     name: id,
@@ -52,6 +53,160 @@ const snapshot = (item, revision = '1') => ({
             repositoryUrl: 'https://github.com/example/backend',
         },
     ],
+});
+
+test('validates partial layout mutations at the SQLite boundary and rejects stale writes', (t) => {
+    const { store } = fixture(t);
+    store.syncSnapshots(snapshot(diagram()));
+    const input = {
+        format: 'keeperd-table-layout',
+        version: 1,
+        repository: { url: 'https://github.com/example/backend.git' },
+        layout: {
+            tables: [tablePlacement({ ...diagram().tables[0], x: 444 })],
+        },
+    };
+    const before = store.view();
+    const apply = (value, revision = before.revision) =>
+        store.mutate({
+            revision,
+            action: 'applyTableLayout',
+            params: { id: 'debut-main', package: value },
+        });
+    for (const invalid of [
+        { ...input, format: 'keeperd-repository-layout' },
+        { ...input, repository: { url: 'https://github.com/other/backend' } },
+        { ...input, layout: { tables: [] } },
+        {
+            ...input,
+            layout: { tables: [{ ...input.layout.tables[0], fields: [] }] },
+        },
+        {
+            ...input,
+            layout: {
+                tables: [{ ...input.layout.tables[0], parentAreaKey: null }],
+            },
+        },
+        {
+            ...input,
+            layout: { tables: [{ ...input.layout.tables[0], name: 'absent' }] },
+        },
+    ]) {
+        assert.throws(
+            () => apply(invalid),
+            (error) => error.code === 'INVALID_WORKSPACE_INPUT'
+        );
+        assert.deepEqual(store.view(), before);
+    }
+    const after = apply(input);
+    assert.equal(after.diagrams[0].tables[0].x, 444);
+    assert.throws(
+        () => apply(input),
+        (error) => error.code === 'WORKSPACE_CONFLICT'
+    );
+    const backup = after.backups.find((b) => b.kind === 'layout-partial');
+    assert.ok(backup);
+    assert.throws(
+        () =>
+            store.mutate({
+                revision: after.revision,
+                action: 'restoreTableLayout',
+                params: { id: 'debut-main', backupId: backup.id + 1 },
+            }),
+        (error) => error.code === 'INVALID_WORKSPACE_INPUT'
+    );
+    const restored = store.mutate({
+        revision: after.revision,
+        action: 'restoreTableLayout',
+        params: { id: 'debut-main', backupId: backup.id },
+    });
+    assert.equal(restored.diagrams[0].tables[0].x, 100);
+    assert.deepEqual(restored.backups, after.backups);
+});
+
+test('rolls back the diagram, shared layout, backup and revision together when partial saving fails', (t) => {
+    const { store } = fixture(t);
+    store.syncSnapshots(snapshot(diagram()));
+    const before = store.view();
+    store.db.exec(
+        "CREATE TRIGGER layout_full BEFORE INSERT ON layouts BEGIN SELECT RAISE(FAIL,'disk full'); END"
+    );
+    assert.throws(
+        () =>
+            store.mutate({
+                revision: before.revision,
+                action: 'applyTableLayout',
+                params: {
+                    id: 'debut-main',
+                    package: {
+                        format: 'keeperd-table-layout',
+                        version: 1,
+                        repository: {
+                            url: 'https://github.com/example/backend',
+                        },
+                        layout: {
+                            tables: [
+                                tablePlacement({
+                                    ...diagram().tables[0],
+                                    x: 999,
+                                }),
+                            ],
+                        },
+                    },
+                },
+            }),
+        /disk full/
+    );
+    assert.deepEqual(store.view(), before);
+});
+
+test('skips a missing partial restore target without changing state or discarding other batched edits', (t) => {
+    const { store } = fixture(t);
+    store.syncSnapshots(snapshot(diagram()));
+    let state = store.mutate({
+        revision: store.view().revision,
+        action: 'applyTableLayout',
+        params: {
+            id: 'debut-main',
+            package: {
+                format: 'keeperd-table-layout',
+                version: 1,
+                repository: { url: 'https://github.com/example/backend' },
+                layout: {
+                    tables: [
+                        tablePlacement({ ...diagram().tables[0], x: 444 }),
+                    ],
+                },
+            },
+        },
+    });
+    const backupId = state.backups.find((b) => b.kind === 'layout-partial').id;
+    state = store.mutate({
+        revision: state.revision,
+        action: 'deleteTable',
+        params: { id: 'debut-main-table' },
+    });
+    const params = { id: 'debut-main', backupId };
+    assert.deepEqual(
+        store.mutate({
+            revision: state.revision,
+            action: 'restoreTableLayout',
+            params,
+        }),
+        state
+    );
+    const next = store.mutate({
+        revision: state.revision,
+        actions: [
+            { action: 'restoreTableLayout', params },
+            { action: 'updateConfig', params: { selectedTab: 'tables' } },
+        ],
+    });
+    assert.equal(next.config.selectedTab, 'tables');
+    assert.equal(next.revision, state.revision + 1);
+    assert.deepEqual(next.diagrams, state.diagrams);
+    assert.deepEqual(next.layouts, state.layouts);
+    assert.deepEqual(next.backups, state.backups);
 });
 
 test('persists full ERD data and config through a real SQLite close/reopen', (t) => {

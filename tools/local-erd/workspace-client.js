@@ -1,4 +1,10 @@
 import { readLegacyWorkspace } from './browser-migration.js';
+import {
+    normalizeWorkspaceSelection,
+    selectWorkspaceValue,
+    workspaceCollections,
+    selectDiagramValue,
+} from './workspace-selection.js';
 const key = Symbol.for('keeperd.workspace-client');
 const shared = (globalThis[key] ??= {
     queue: Promise.resolve(),
@@ -8,17 +14,22 @@ const shared = (globalThis[key] ??= {
     pending: [],
     timer: null,
 });
+shared.revision ??= shared.state?.revision ?? null;
+shared.selections ??= new Map();
 export function workspaceNotice(message) {
     if (typeof window !== 'undefined')
         window.dispatchEvent(
             new CustomEvent('keeperd:storage-notice', { detail: message })
         );
 }
-async function request(input) {
+async function request(input, selection) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30000);
     try {
-        const response = await fetch('/api/workspace', {
+        const url = selection
+            ? `/api/workspace?selection=${encodeURIComponent(JSON.stringify(selection))}`
+            : '/api/workspace';
+        const response = await fetch(url, {
             cache: 'no-store',
             signal: controller.signal,
             ...(input
@@ -46,10 +57,44 @@ async function request(input) {
         clearTimeout(timer);
     }
 }
+function checkResponse(value) {
+    if (!value || !Number.isSafeInteger(value.revision) || value.revision < 0)
+        throw new Error('작업 데이터 응답 형식을 확인하세요.');
+}
+function acceptRead(value, selection) {
+    checkResponse(value);
+    if (
+        shared.revision !== null &&
+        value.revision !== shared.revision &&
+        shared.edited
+    ) {
+        shared.halted = true;
+        workspaceNotice(
+            '다른 브라우저 또는 Sync에서 작업 데이터가 변경됐습니다. 현재 화면을 JSON으로 내보낸 뒤 새로고침하세요.'
+        );
+        throw new Error('작업 데이터가 변경됐습니다. 새로고침이 필요합니다.');
+    }
+    if (value.revision !== shared.revision) {
+        shared.state = null;
+        shared.selections.clear();
+    }
+    shared.revision = value.revision;
+    if (value.kind === 'selection-v1' && selection) {
+        shared.selections.set(JSON.stringify(selection), value.value);
+        return value.value;
+    }
+    // Older servers ignore selection/response options and return full state.
+    if (!Array.isArray(value.diagrams))
+        throw new Error('작업 데이터 응답 형식을 확인하세요.');
+    shared.state = value;
+    shared.selections.clear();
+    return selection ? selectWorkspaceValue(value, selection) : value;
+}
 async function initialize() {
     if (!shared.ready)
         shared.ready = (async () => {
-            shared.state = await request();
+            const selection = { kind: 'config' };
+            acceptRead(await request(undefined, selection), selection);
             try {
                 const legacy = await readLegacyWorkspace();
                 if (legacy.warning) workspaceNotice(legacy.warning);
@@ -60,10 +105,12 @@ async function initialize() {
                     legacy.config ||
                     legacy.filters.length
                 ) {
-                    shared.state = await request({
-                        action: 'migrate',
-                        params: legacy,
-                    });
+                    acceptRead(
+                        await request({
+                            action: 'migrate',
+                            params: legacy,
+                        })
+                    );
                 }
             } catch (error) {
                 workspaceNotice(
@@ -78,23 +125,52 @@ async function initialize() {
     await shared.ready;
     return shared.state;
 }
-export async function readWorkspace({ refresh = false } = {}) {
+export async function readWorkspace({ refresh = false, selection } = {}) {
+    const scope =
+        selection === undefined
+            ? undefined
+            : normalizeWorkspaceSelection(selection);
     await initialize();
-    await shared.queue;
-    if (refresh) {
-        const fresh = await request();
-        if (fresh.revision !== shared.state.revision && shared.edited) {
-            shared.halted = true;
-            workspaceNotice(
-                '다른 브라우저 또는 Sync에서 작업 데이터가 변경됐습니다. 현재 화면을 JSON으로 내보낸 뒤 새로고침하세요.'
-            );
-            throw new Error(
-                '작업 데이터가 변경됐습니다. 새로고침이 필요합니다.'
-            );
+    // Reads and writes share the same barrier: an old GET must never arrive
+    // after a local save and overwrite the new revision or poison its queue.
+    const run = shared.queue.then(async () => {
+        let value;
+        const key = scope && JSON.stringify(scope);
+        if (!refresh && shared.state)
+            value = scope
+                ? selectWorkspaceValue(shared.state, scope)
+                : shared.state;
+        else if (!refresh && scope && shared.selections.has(key))
+            value = shared.selections.get(key);
+        else {
+            const fullDiagramKey =
+                scope?.diagramId &&
+                JSON.stringify({
+                    kind: 'diagram',
+                    diagramId: scope.diagramId,
+                    includes: workspaceCollections,
+                });
+            const diagram =
+                !refresh &&
+                fullDiagramKey &&
+                shared.selections.get(fullDiagramKey);
+            if (diagram && scope.kind === 'diagram')
+                value = selectDiagramValue(diagram, scope.includes);
+            else if (diagram && scope.kind === 'collection')
+                value = diagram[scope.collection] ?? [];
+            else if (diagram && scope.kind === 'entity')
+                value = diagram[scope.collection]?.find(
+                    (item) => item.id === scope.id
+                );
+            else value = acceptRead(await request(undefined, scope), scope);
         }
-        shared.state = fresh;
-    }
-    return structuredClone(shared.state);
+        return structuredClone(value);
+    });
+    shared.queue = run.then(
+        () => {},
+        () => {}
+    );
+    return run;
 }
 function flush() {
     shared.timer = null;
@@ -107,13 +183,20 @@ function flush() {
             );
         try {
             shared.edited = true;
-            shared.state = await request({
-                revision: shared.state.revision,
+            const value = await request({
+                revision: shared.revision,
+                response: 'ack-v1',
                 actions: pending.map((item) => ({
                     action: item.action,
                     params: item.params,
                 })),
             });
+            checkResponse(value);
+            if (value.kind === 'ack-v1') shared.state = null;
+            else if (Array.isArray(value.diagrams)) shared.state = value;
+            else throw new Error('작업 데이터 저장 응답을 확인하세요.');
+            shared.revision = value.revision;
+            shared.selections.clear();
             for (const item of pending) item.resolve();
         } catch (error) {
             shared.halted = true;

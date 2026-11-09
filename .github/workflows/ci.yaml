@@ -67,6 +67,11 @@ jobs:
             tools/local-erd/node-runtime.mjs \
             tools/local-erd/workspace-store.mjs \
             tools/local-erd/workspace-client.js \
+            tools/local-erd/layout-package.js \
+            tools/local-erd/layout-table-picker.js \
+            tools/local-erd/workspace-selection.js \
+            tools/local-erd/local-branches.mjs \
+            tools/local-erd/local-branches-worker.mjs \
             tools/local-erd/browser-migration.js \
             src/lib/local-branch-merge.ts \
             src/lib/repository-layout.ts \

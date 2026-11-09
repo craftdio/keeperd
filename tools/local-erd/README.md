@@ -57,13 +57,16 @@ Table layout is shared by repository and matched by schema and table name. Table
 
 Open the editor's workspace-sharing action to export or import JSON. The receiving ERD must belong to the **same repository**. Different branches and commits are supported; matching uses schema and table names, and missing tables are skipped. Sharing changes layout, not database structure.
 
-1. Export the current workspace as `*.keeperd-layout.json` from the sharing panel.
-2. Open an ERD from the same repository on the receiving computer or browser.
-3. Choose the JSON file, review its source and item counts, and apply it.
+| Export                | Includes                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------------------------- |
+| Full workspace layout | Table positions, sizes, colors, Areas, and notes.                                                     |
+| Selected tables       | Only the selected tables' placement and display settings; no columns, relationships, Areas, or notes. |
 
-Exports include table positions, sizes, colors, Areas, and notes. Applying a layout attempts a backup first; if backup storage fails, a warning is shown and the import can continue. Use the sharing panel's undo action to restore the previous import state while its recovery backup is retained.
+For selected tables, use the list, schema checkboxes, search, or canvas. Clicking a table adds it; clicking it again removes it. The selected-table chips remain visible across searches, and clicking a chip locates its table. Export as `*.keeperd-tables.json`.
 
-Sharing uses manual JSON files, with no automatic upload. Exports can contain note text. Files over 5 MB or with invalid content are rejected.
+Import a JSON file, review the matching and skipped counts, then apply. Unselected layouts and existing Area memberships are preserved during partial import. Its pre-change layout backup must succeed before applying. Use the import panel's undo action to restore the affected tables only. Full-layout import attempts a backup but can continue with a warning if backup storage fails.
+
+Full exports use `*.keeperd-layout.json`. Both formats are manual files; KeepERD does not upload them automatically. Full exports can contain note text. Files over 5 MB or with invalid content are rejected.
 
 ## Edit and manage ERDs
 

@@ -12,6 +12,24 @@ export interface WorkspaceState {
 export function readWorkspace(options?: {
     refresh?: boolean;
 }): Promise<WorkspaceState>;
+type Collection =
+    | 'tables'
+    | 'relationships'
+    | 'dependencies'
+    | 'areas'
+    | 'customTypes'
+    | 'notes';
+export type WorkspaceSelection =
+    | { kind: 'config' }
+    | { kind: 'filter'; diagramId: string }
+    | { kind: 'diagrams'; includes?: Collection[] }
+    | { kind: 'diagram'; diagramId: string; includes?: Collection[] }
+    | { kind: 'collection'; diagramId: string; collection: Collection }
+    | { kind: 'entity'; diagramId: string; collection: Collection; id: string };
+export function readWorkspace(options: {
+    refresh?: boolean;
+    selection: WorkspaceSelection;
+}): Promise<unknown>;
 export function writeWorkspace(action: string, params: unknown): Promise<void>;
 export function workspaceNotice(message: string): void;
 export function workspaceBackup(id: number): Promise<unknown>;

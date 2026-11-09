@@ -9,7 +9,7 @@ import { useLayout } from '@/hooks/use-layout';
 import { EmptyState } from '@/components/empty-state/empty-state';
 import { ScrollArea } from '@/components/scroll-area/scroll-area';
 import { useTranslation } from 'react-i18next';
-import { useViewport } from '@xyflow/react';
+import { useReactFlow } from '@xyflow/react';
 import { useDialog } from '@/hooks/use-dialog';
 import type { DBSchema } from '@/lib/domain';
 import { useDiagramFilter } from '@/context/diagram-filter-context/use-diagram-filter';
@@ -25,7 +25,7 @@ export const TablesSection: React.FC<TablesSectionProps> = () => {
     const { filter, schemasDisplayed, hasActiveFilter, resetFilter } =
         useDiagramFilter();
     const { openTableSchemaDialog } = useDialog();
-    const viewport = useViewport();
+    const { getViewport } = useReactFlow();
     const { t } = useTranslation();
     const { openTableFromSidebar } = useLayout();
     const [filterText, setFilterText] = React.useState('');
@@ -69,12 +69,13 @@ export const TablesSection: React.FC<TablesSectionProps> = () => {
     }, [tablesFilteredByDiagram, filterText, showDBViews]);
 
     const getCenterLocation = useCallback(() => {
+        const viewport = getViewport();
         const padding = 80;
         const centerX = -viewport.x / viewport.zoom + padding / viewport.zoom;
         const centerY = -viewport.y / viewport.zoom + padding / viewport.zoom;
 
         return { centerX, centerY };
-    }, [viewport.x, viewport.y, viewport.zoom]);
+    }, [getViewport]);
 
     const createTableWithLocation = useCallback(
         async ({ schema }: { schema?: DBSchema }) => {

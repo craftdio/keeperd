@@ -8,6 +8,8 @@ import {
     writeFileSync,
     rmSync,
     readFileSync,
+    chmodSync,
+    existsSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -38,10 +40,15 @@ test(
                 'server.mjs',
                 'node-runtime.mjs',
                 'workspace-store.mjs',
+                'layout-package.js',
+                'workspace-selection.js',
+                'layout-table-picker.js',
                 'branches.mjs',
                 'folder-picker.mjs',
                 'library-store.mjs',
                 'local-source.mjs',
+                'local-branches.mjs',
+                'local-branches-worker.mjs',
                 'schema-replay.mjs',
                 'sync-errors.mjs',
                 'git-credentials.mjs',
@@ -92,12 +99,35 @@ test(
             git('add', '.');
             git('commit', '-m', 'initial');
             git('branch', 'local-only');
+            const wrapperDirectory = path.join(root, 'git-wrapper');
+            mkdirSync(wrapperDirectory);
+            const gate = path.join(root, 'delay-git');
+            const observed = path.join(root, 'git-blocked');
+            const realGit = execFileSync('which', ['git'], {
+                encoding: 'utf8',
+            }).trim();
+            const wrapper = path.join(wrapperDirectory, 'git');
+            writeFileSync(
+                wrapper,
+                `#!${process.execPath}
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+if (process.argv.includes('for-each-ref') && fs.existsSync(${JSON.stringify(gate)})) {
+    fs.writeFileSync(${JSON.stringify(observed)}, 'blocked');
+    while (fs.existsSync(${JSON.stringify(gate)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+}
+const child = spawnSync(${JSON.stringify(realGit)}, process.argv.slice(2), { stdio: 'inherit' });
+process.exit(child.status ?? 1);
+`
+            );
+            chmodSync(wrapper, 0o755);
             child = spawn(process.execPath, [path.join(tools, 'server.mjs')], {
                 env: {
                     ...process.env,
                     CI: 'true',
                     LOCAL_ERD_PORT: '0',
                     KEEPERD_STATE_DIR: path.join(root, '.local-erd'),
+                    PATH: `${wrapperDirectory}${path.delimiter}${process.env.PATH}`,
                 },
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
@@ -120,6 +150,24 @@ test(
                 );
             });
             const base = `http://localhost:${new URL(listeningUrl).port}`;
+            // Browser module imports must be served as JavaScript, never the
+            // editor HTML fallback, by the actual packaged server route.
+            for (const file of [
+                'layout-package.js',
+                'layout-table-picker.js',
+                'workspace-selection.js',
+            ]) {
+                const response = await fetch(`${base}/${file}`);
+                assert.equal(response.status, 200);
+                assert.match(
+                    response.headers.get('content-type'),
+                    /javascript/
+                );
+                assert.equal(
+                    await response.text(),
+                    readFileSync(new URL(file, import.meta.url), 'utf8')
+                );
+            }
             // The server is authoritative across independent browser requests.
             assert.equal(
                 (await fetch(`${base}/data/%2e%2e%2fkeeperd.sqlite`)).status,
@@ -128,6 +176,23 @@ test(
             const workspaceResponse = await fetch(`${base}/api/workspace`);
             assert.equal(workspaceResponse.status, 200);
             const firstWorkspace = await workspaceResponse.json();
+            const configSelection = await fetch(
+                `${base}/api/workspace?selection=${encodeURIComponent(JSON.stringify({ kind: 'config' }))}`
+            );
+            assert.equal(configSelection.status, 200);
+            const selectedConfig = await configSelection.json();
+            assert.equal(selectedConfig.kind, 'selection-v1');
+            assert.equal(selectedConfig.revision, firstWorkspace.revision);
+            assert.deepEqual(selectedConfig.value, firstWorkspace.config);
+            assert.equal(
+                (await fetch(`${base}/api/workspace?selection=not-json`))
+                    .status,
+                400
+            );
+            assert.equal(
+                (await fetch(`${base}/api/workspace?selection=null`)).status,
+                400
+            );
             const workspaceDiagram = {
                 id: 'workspace-test',
                 name: 'SQLite ERD',
@@ -153,6 +218,27 @@ test(
                 (await saveWorkspace(firstWorkspace.revision)).status,
                 200
             );
+            const latestRevision = (
+                await (await fetch(`${base}/api/workspace`)).json()
+            ).revision;
+            const receiptResponse = await fetch(`${base}/api/workspace`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Local-ERD': 'sync',
+                },
+                body: JSON.stringify({
+                    revision: latestRevision,
+                    response: 'ack-v1',
+                    action: 'updateConfig',
+                    params: { theme: 'dark' },
+                }),
+            });
+            assert.equal(receiptResponse.status, 200);
+            assert.deepEqual(await receiptResponse.json(), {
+                kind: 'ack-v1',
+                revision: latestRevision + 1,
+            });
             assert.equal(
                 (await saveWorkspace(firstWorkspace.revision)).status,
                 409
@@ -274,6 +360,30 @@ test(
             );
             assert.equal(branches.branches[0].remoteStatus, 'unpublished');
             assert.equal(branches.current, 'main');
+            // Keep Git blocked until a second API has actually responded. This
+            // verifies event-loop isolation without depending on machine speed.
+            writeFileSync(gate, 'delay');
+            const slowBranches = fetch(
+                `${base}/api/local/branches?local=${registered.id}`
+            );
+            try {
+                const deadline = Date.now() + 3000;
+                while (!existsSync(observed) && Date.now() < deadline)
+                    await new Promise((resolve) => setTimeout(resolve, 10));
+                assert.ok(existsSync(observed), 'worker must have entered Git');
+                const responsive = await fetch(
+                    `${base}/api/workspace?selection=${encodeURIComponent(JSON.stringify({ kind: 'config' }))}`,
+                    { signal: AbortSignal.timeout(2000) }
+                );
+                assert.equal(responsive.status, 200);
+                assert.ok(
+                    existsSync(gate),
+                    'Git is still blocked while workspace responds'
+                );
+            } finally {
+                rmSync(gate, { force: true });
+            }
+            assert.equal((await slowBranches).status, 200);
             assert.equal(
                 (await fetch(`${base}/api/local/branches?local=unknown`))
                     .status,

@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { chooseRepositoryFolder } from './folder-picker.mjs';
 import { listSaved, deleteSaved, LibraryError } from './library-store.mjs';
 import { createMemoryCache } from './memory-cache.mjs';
+import { createLocalBranchReader } from './local-branches.mjs';
 import { hasCurrentBuild } from './build-state.mjs';
 import { localCommand } from './cli-command.mjs';
 import { stateDirectory } from './state-paths.mjs';
@@ -48,7 +49,6 @@ import {
     registerLocalRepository,
     describeLocalRepository,
     resolveLocalRepository,
-    localBranchDetails,
     localDiagramKey,
     checkRemoteBranch,
     LocalSourceError,
@@ -67,6 +67,7 @@ if (startOptions.help) {
 }
 const dist = path.resolve(root, '../../dist');
 const state = stateDirectory();
+const localBranchReader = createLocalBranchReader();
 const port = Number(process.env.LOCAL_ERD_PORT ?? 18777);
 let workspace;
 const getWorkspace = () => (workspace ??= openWorkspace(state));
@@ -552,17 +553,21 @@ const server = createServer(async (req, res) => {
                             );
                             return;
                         }
-                        const local = resolveLocalRepository(
-                            config,
-                            url.searchParams.get('local')
-                        );
                         if (url.pathname === '/api/local/check') {
+                            const local = resolveLocalRepository(
+                                config,
+                                url.searchParams.get('local')
+                            );
                             const branch = validateBranch(
                                 url.searchParams.get('branch')
                             );
                             payload = checkRemoteBranch(local, branch);
                             remoteChecks.set(`${local.id}:${branch}`, payload);
-                        } else payload = localBranchDetails(local);
+                        } else
+                            payload = await localBranchReader.read(
+                                config,
+                                url.searchParams.get('local')
+                            );
                     }
                     res.writeHead(200, {
                         'Content-Type': 'application/json',
@@ -613,9 +618,26 @@ const server = createServer(async (req, res) => {
                     let payload;
                     if (req.method === 'GET') {
                         const backupId = url.searchParams.get('backup');
+                        let selection;
+                        if (url.searchParams.has('selection')) {
+                            const raw = url.searchParams.get('selection');
+                            if (raw.length > 4096)
+                                throw new WorkspaceError(
+                                    'INVALID_SELECTION',
+                                    '읽기 범위가 너무 큽니다.'
+                                );
+                            try {
+                                selection = JSON.parse(raw);
+                            } catch {
+                                throw new WorkspaceError(
+                                    'INVALID_SELECTION',
+                                    '읽기 범위 JSON을 확인하세요.'
+                                );
+                            }
+                        }
                         payload = backupId
                             ? { value: store.readBackup(Number(backupId)) }
-                            : store.view();
+                            : store.view(selection);
                         if (importWarning) payload.warning = importWarning;
                     } else if (req.method === 'POST') {
                         if (req.headers['x-local-erd'] !== 'sync') {
@@ -936,8 +958,11 @@ const server = createServer(async (req, res) => {
                 '/library.js',
                 '/browser-store.js',
                 '/workspace-client.js',
+                '/workspace-selection.js',
                 '/browser-migration.js',
                 '/layout-transfer.js',
+                '/layout-package.js',
+                '/layout-table-picker.js',
             ].includes(url.pathname)
         ) {
             res.writeHead(200, {

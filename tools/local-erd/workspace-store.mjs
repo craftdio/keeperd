@@ -3,6 +3,18 @@ const Database = sqlite.Database ?? sqlite.DatabaseSync;
 import { mkdirSync, chmodSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import {
+    normalizeWorkspaceSelection,
+    selectDiagramValue,
+} from './workspace-selection.js';
+import {
+    isPartialLayoutPackage,
+    layoutPosition,
+    parseLayoutPackage,
+    PARTIAL_FORMAT,
+    tableKey,
+    tablePlacement,
+} from './layout-package.js';
 import { mergeBranchDiagram } from '../../src/lib/local-branch-merge.ts';
 import {
     applyRepositoryLayout,
@@ -256,33 +268,86 @@ export function openWorkspace(
             );
         }
     };
-    const view = () => ({
-        revision: revision(),
-        diagrams: db
-            .prepare('SELECT id FROM diagrams ORDER BY rowid')
-            .all()
-            .map(({ id }) => current(id)),
-        layouts: db.prepare('SELECT body FROM layouts').all().map(parse),
-        filters: Object.fromEntries(
-            db
-                .prepare('SELECT * FROM filters')
-                .all()
-                .map((item) => [item.id, parse(item)])
-        ),
-        config: parse(
-            db.prepare("SELECT body FROM meta WHERE key='config'").get()
-        ) ?? {
+    const readConfig = () =>
+        parse(db.prepare("SELECT body FROM meta WHERE key='config'").get()) ?? {
             defaultDiagramId:
                 db.prepare('SELECT id FROM diagrams LIMIT 1').get()?.id ?? '',
-        },
-        backups: db
-            .prepare(
-                'SELECT id,diagram_id AS diagramId,kind,bytes FROM backups ORDER BY id DESC'
-            )
-            .all(),
-        backupPolicy: policy,
-        ...(backupWarning ? { warning: backupWarning } : {}),
-    });
+        };
+    const view = (selection) => {
+        if (selection !== undefined) {
+            let scope;
+            try {
+                scope = normalizeWorkspaceSelection(selection);
+            } catch (error) {
+                fail(error.message);
+            }
+            let value;
+            if (scope.kind === 'config') value = readConfig();
+            else if (scope.kind === 'filter')
+                value = parse(
+                    db
+                        .prepare('SELECT body FROM filters WHERE id=?')
+                        .get(scope.diagramId)
+                );
+            else if (scope.kind === 'diagrams') {
+                if (!scope.includes.length) {
+                    // Drop schema collections inside SQLite, before allocating
+                    // their JSON objects in Node for the diagram list.
+                    value = db
+                        .prepare(
+                            "SELECT json_remove(body, '$.tables', '$.relationships', '$.dependencies', '$.areas', '$.customTypes', '$.notes') AS body FROM diagrams ORDER BY rowid"
+                        )
+                        .all()
+                        .map(parse);
+                } else
+                    value = db
+                        .prepare('SELECT id FROM diagrams ORDER BY rowid')
+                        .all()
+                        .map(({ id }) =>
+                            selectDiagramValue(current(id), scope.includes)
+                        );
+            } else {
+                const diagram = current(scope.diagramId);
+                if (scope.kind === 'diagram')
+                    value = selectDiagramValue(diagram, scope.includes);
+                else {
+                    const rows = diagram?.[scope.collection] ?? [];
+                    value =
+                        scope.kind === 'collection'
+                            ? rows
+                            : rows.find((item) => item.id === scope.id);
+                }
+            }
+            return {
+                kind: 'selection-v1',
+                revision: revision(),
+                value,
+                ...(backupWarning ? { warning: backupWarning } : {}),
+            };
+        }
+        return {
+            revision: revision(),
+            diagrams: db
+                .prepare('SELECT id FROM diagrams ORDER BY rowid')
+                .all()
+                .map(({ id }) => current(id)),
+            layouts: db.prepare('SELECT body FROM layouts').all().map(parse),
+            filters: Object.fromEntries(
+                db
+                    .prepare('SELECT * FROM filters')
+                    .all()
+                    .map((item) => [item.id, parse(item)])
+            ),
+            config: readConfig(),
+            backups: db
+                .prepare(
+                    'SELECT id,diagram_id AS diagramId,kind,bytes FROM backups ORDER BY id DESC'
+                )
+                .all(),
+            backupPolicy: policy,
+            ...(backupWarning ? { warning: backupWarning } : {}),
+        };
+    };
     function checkRevision(expected) {
         if (!Number.isSafeInteger(expected) || expected !== revision())
             throw new WorkspaceError(
@@ -530,6 +595,7 @@ export function openWorkspace(
                 actions.length > 1000
             )
                 fail('저장 작업 수를 확인하세요.');
+            let changed = false;
             for (const { action, params = {} } of actions) {
                 if (action === 'updateConfig') {
                     const previous = view().config;
@@ -601,6 +667,112 @@ export function openWorkspace(
                     ).toISOString();
                     put(next, { ...stored, edited: 1 });
                     saveLayout(stored.repository, next);
+                } else if (
+                    action === 'applyTableLayout' ||
+                    action === 'restoreTableLayout'
+                ) {
+                    const diagram = current(params.id),
+                        stored = row(params.id);
+                    if (!diagram)
+                        throw new WorkspaceError(
+                            'DIAGRAM_NOT_FOUND',
+                            '저장된 ERD를 찾을 수 없습니다.',
+                            404
+                        );
+                    let value = params.package;
+                    if (action === 'restoreTableLayout') {
+                        const saved =
+                            Number.isSafeInteger(params.backupId) &&
+                            db
+                                .prepare(
+                                    "SELECT * FROM backups WHERE id=? AND diagram_id=? AND kind='layout-partial'"
+                                )
+                                .get(params.backupId, params.id);
+                        if (!saved)
+                            fail('되돌릴 부분 작업 데이터 백업이 없습니다.');
+                        value = parse(saved);
+                    }
+                    let input;
+                    try {
+                        input = parseLayoutPackage(value);
+                    } catch (error) {
+                        fail(error.message);
+                    }
+                    if (!isPartialLayoutPackage(input))
+                        fail('부분 작업 데이터 JSON을 선택하세요.');
+                    if (
+                        !stored.repository ||
+                        repositoryKey(input.repository.url) !==
+                            stored.repository
+                    )
+                        fail('현재 ERD와 레포가 다릅니다.');
+                    const imported = new Map(
+                        input.layout.tables.map((table) => [
+                            tableKey(table),
+                            table,
+                        ])
+                    );
+                    const matched = (diagram.tables ?? []).filter((table) =>
+                        imported.has(tableKey(table))
+                    );
+                    if (!matched.length) {
+                        // A valid backup can outlive all of its tables after
+                        // deletion or Sync. Skip it without poisoning the
+                        // client's save queue or changing the revision.
+                        if (action === 'restoreTableLayout') continue;
+                        fail('현재 ERD에 일치하는 테이블이 없습니다.');
+                    }
+                    // Keep the complete shared layout, including hidden areas and
+                    // positions belonging only to other branches. Do not recapture
+                    // it from this branch's filtered diagram after a partial edit.
+                    const captured = captureRepositoryLayout(
+                        stored.repository,
+                        diagram
+                    );
+                    const shared = layout(stored.repository) ?? captured;
+                    if (
+                        action === 'applyTableLayout' &&
+                        !backup(params.id, 'layout-partial', {
+                            format: PARTIAL_FORMAT,
+                            version: 1,
+                            repository: input.repository,
+                            layout: { tables: matched.map(tablePlacement) },
+                        })
+                    )
+                        throw new WorkspaceError(
+                            'LAYOUT_BACKUP_FAILED',
+                            '적용 전 백업을 저장하지 못해 부분 적용을 중단했습니다.'
+                        );
+                    const nextLayout = {
+                        ...shared,
+                        tables: { ...shared.tables },
+                    };
+                    const next = {
+                        ...diagram,
+                        tables: (diagram.tables ?? []).map((table) => {
+                            const incoming = imported.get(tableKey(table));
+                            if (!incoming) return table;
+                            const position = layoutPosition(incoming);
+                            nextLayout.tables[tableKey(table)] = {
+                                ...(shared.tables[tableKey(table)] ??
+                                    captured.tables[tableKey(table)]),
+                                ...position,
+                            };
+                            return { ...table, ...position };
+                        }),
+                        updatedAt: new Date(
+                            Math.max(
+                                Date.now(),
+                                Date.parse(diagram.updatedAt) + 1
+                            )
+                        ).toISOString(),
+                    };
+                    put(next, { ...stored, edited: 1 });
+                    writeLayout(
+                        stored.repository,
+                        nextLayout,
+                        Date.parse(next.updatedAt)
+                    );
                 } else if (action === 'deleteDiagram') {
                     remove(params.id);
                 } else if (
@@ -688,9 +860,16 @@ export function openWorkspace(
                     put(next, { ...stored, edited: 1 });
                     saveLayout(stored.repository, next);
                 }
+                changed = true;
             }
-            bump();
-            return view();
+            if (changed) bump();
+            return input.response === 'ack-v1'
+                ? {
+                      kind: 'ack-v1',
+                      revision: revision(),
+                      ...(backupWarning ? { warning: backupWarning } : {}),
+                  }
+                : view();
         });
     }
     try {

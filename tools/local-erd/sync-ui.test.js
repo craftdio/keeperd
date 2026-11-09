@@ -10,6 +10,7 @@ const response = (payload, ok = true, status = 200) => ({
 let listeners;
 beforeEach(() => {
     vi.resetModules();
+    delete globalThis[Symbol.for('keeperd.workspace-client')];
     document.documentElement.innerHTML = html;
     listeners = [];
     const original = window.addEventListener.bind(window);
@@ -761,12 +762,22 @@ it('draws one canvas border when the first sync adds the whole schema', async ()
 
 it('opens the work data sharing panel with the current repo, branch and commit', async () => {
     history.replaceState({}, '', '/diagrams/debut-main');
+    vi.stubGlobal('indexedDB', undefined);
     localStorage.removeItem('debut-layout-backup:debut-main');
     vi.stubGlobal(
         'fetch',
         vi.fn(async (path) => {
             if (path === '/api/context')
                 return response({ primaryUrl: repositoryUrl });
+            if (path.startsWith('/api/workspace'))
+                return response({
+                    revision: 1,
+                    diagrams: [{ id: 'debut-main', tables: [] }],
+                    layouts: [],
+                    backups: [],
+                    config: {},
+                    filters: {},
+                });
             if (path === '/data/snapshots.json')
                 return response({
                     snapshots: [
@@ -788,14 +799,443 @@ it('opens the work data sharing panel with the current repo, branch and commit',
 
     const button = document.querySelector('#erd-layout-action');
     await vi.waitFor(() => expect(button.disabled).toBe(false));
-    button.click();
+    await button.onclick();
 
     expect(document.querySelector('#erd-layout-panel')).toHaveClass('visible');
     expect(document.querySelector('#erd-layout-source').textContent).toBe(
-        '레포 공통 작업 데이터 · https://github.com/example/backend.git'
+        'example/backend'
     );
-    expect(document.querySelector('#erd-layout-status').textContent).toContain(
-        'JSON 파일'
+    expect(document.querySelector('#erd-layout-branch span').textContent).toBe(
+        'main'
     );
+    expect(document.querySelector('#erd-layout-branch').title).toBe(
+        '현재 ERD 브랜치: main'
+    );
+    expect(document.querySelector('#erd-layout-status').hidden).toBe(true);
     expect(document.querySelector('#erd-layout-restore').hidden).toBe(true);
+});
+
+async function sharingPanel() {
+    history.replaceState({}, '', '/diagrams/debut-main');
+    vi.stubGlobal('indexedDB', undefined);
+    const tables = [
+        {
+            id: 'users',
+            schema: 'public',
+            name: 'users',
+            x: 10,
+            y: 20,
+            color: '#123456',
+            fields: [{ id: 'field', name: 'id' }],
+        },
+        {
+            id: 'audit-users',
+            schema: 'audit',
+            name: 'users',
+            x: 50,
+            y: 60,
+            color: '#ffffff',
+            fields: [],
+        },
+    ];
+    const state = {
+        revision: 1,
+        diagrams: [{ id: 'debut-main', tables, areas: [], notes: [] }],
+        layouts: [],
+        backups: [],
+        filters: {},
+        config: {},
+    };
+    const fetch = vi.fn(async (path) => {
+        if (path === '/api/context')
+            return response({ primaryUrl: repositoryUrl });
+        if (path === '/data/snapshots.json')
+            return response({
+                snapshots: [
+                    {
+                        repositoryUrl,
+                        branch: 'main',
+                        revision: 'abc123',
+                        diagram: { id: 'debut-main' },
+                    },
+                ],
+            });
+        if (path.startsWith('/api/workspace')) return response(state);
+        if (path.startsWith('/api/branches'))
+            return response({ branches: ['main'] });
+        return response({ status: 'idle' });
+    });
+    vi.stubGlobal('fetch', fetch);
+    await import('./sync-ui.js');
+    const button = document.querySelector('#erd-layout-action');
+    await vi.waitFor(() => expect(button.disabled).toBe(false));
+    await button.onclick();
+    return { state, fetch };
+}
+
+it('downloads only selected table placements and keeps full export available', async () => {
+    await sharingPanel();
+    const selectedExport = document.querySelector(
+        '#erd-layout-export-selected'
+    );
+    expect(selectedExport.disabled).toBe(true);
+    expect(document.querySelector('#erd-layout-export').disabled).toBe(false);
+    let blob;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((value) => {
+        blob = value;
+        return 'blob:test';
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const search = document.querySelector(
+        '#erd-layout-picker input[type=search]'
+    );
+    search.value = 'audit';
+    search.dispatchEvent(new Event('input'));
+    document.querySelector('#erd-layout-picker [data-select-all]').click();
+    expect(selectedExport.disabled).toBe(false);
+    await selectedExport.onclick();
+    const partial = JSON.parse(await blob.text());
+    expect(partial.format).toBe('keeperd-table-layout');
+    expect(partial.layout.tables).toHaveLength(1);
+    expect(partial.layout.tables[0]).toMatchObject({
+        schema: 'audit',
+        name: 'users',
+        x: 50,
+    });
+    expect(partial.layout.tables[0].fields).toBeUndefined();
+    expect(partial.layout.areas).toBeUndefined();
+    document.querySelector('input[name=erd-layout-scope][value=all]').click();
+    expect(document.querySelector('#erd-layout-picker').hidden).toBe(true);
+    expect(document.querySelector('#erd-layout-export-selected').hidden).toBe(
+        true
+    );
+    await document.querySelector('#erd-layout-export').onclick();
+    expect(JSON.parse(await blob.text()).format).toBe(
+        'keeperd-repository-layout'
+    );
+});
+
+it('previews partial match and skip counts, blocks zero matches, and rejects a different repository', async () => {
+    await sharingPanel();
+    document.querySelector('#erd-layout-tab-import').click();
+    const file = document.querySelector('#erd-layout-file');
+    const apply = document.querySelector('#erd-layout-apply');
+    const status = document.querySelector('#erd-layout-status');
+    const row = {
+        schema: 'public',
+        name: 'users',
+        x: 100,
+        y: 200,
+        color: '#000000',
+        width: null,
+        expanded: null,
+        order: null,
+    };
+    const input = {
+        format: 'keeperd-table-layout',
+        version: 1,
+        repository: { url: repositoryUrl },
+        layout: { tables: [row, { ...row, name: 'absent' }] },
+    };
+    const load = async () => {
+        Object.defineProperty(file, 'files', {
+            configurable: true,
+            value: [{ size: 100, text: async () => JSON.stringify(input) }],
+        });
+        await file.onchange();
+    };
+    await load();
+    expect(document.querySelector('#erd-layout-count-total').textContent).toBe(
+        '2'
+    );
+    expect(
+        document.querySelector('#erd-layout-count-matched').textContent
+    ).toBe('1');
+    expect(
+        document.querySelector('#erd-layout-count-skipped').textContent
+    ).toBe('1');
+    expect(
+        document.querySelector('#erd-layout-import-help').textContent
+    ).toContain('Area 소속은 유지');
+    expect(apply.hidden).toBe(false);
+    expect(apply.textContent).toContain('1개 테이블에 적용');
+    input.layout.tables = [{ ...row, name: 'absent' }];
+    await load();
+    expect(apply.hidden).toBe(true);
+    expect(status.textContent).toContain('적용할 테이블이 없습니다');
+    input.repository.url = 'https://github.com/other/repo';
+    await load();
+    expect(status.textContent).toContain('레포가 다릅니다');
+    expect(apply.hidden).toBe(true);
+});
+
+it('separates import from export, preserves choices between tabs and restores focus on Escape', async () => {
+    await sharingPanel();
+    const dialog = document.querySelector('#erd-layout-panel [role=dialog]');
+    expect(dialog.hasAttribute('aria-modal')).toBe(false);
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
+    outside.click();
+    expect(document.querySelector('#erd-layout-panel')).toHaveClass('visible');
+    const tab = new KeyboardEvent('keydown', {
+        key: 'Tab',
+        bubbles: true,
+        cancelable: true,
+    });
+    dialog.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(false);
+    expect(document.querySelector('#erd-layout-export-panel').hidden).toBe(
+        false
+    );
+    expect(document.querySelector('#erd-layout-import-panel').hidden).toBe(
+        true
+    );
+    document.querySelector('#erd-layout-picker [data-schema="public"]').click();
+    const selected = document.querySelector('#erd-layout-export-selected');
+    expect(selected.textContent).toBe('1개 테이블 내보내기');
+    const exportTab = document.querySelector('#erd-layout-tab-export');
+    exportTab.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })
+    );
+    expect(document.querySelector('#erd-layout-import-panel').hidden).toBe(
+        false
+    );
+    expect(document.querySelector('#erd-layout-export-panel').hidden).toBe(
+        true
+    );
+    document.querySelector('#erd-layout-tab-export').click();
+    expect(selected.textContent).toBe('1개 테이블 내보내기');
+    const opener = document.querySelector('#erd-layout-action');
+    document.querySelector('#erd-layout-close').click();
+    opener.focus();
+    await opener.onclick();
+    expect(selected.textContent).toBe('1개 테이블 내보내기');
+    document
+        .querySelector('#erd-layout-tab-export')
+        .dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+        );
+    expect(document.querySelector('#erd-layout-panel')).not.toHaveClass(
+        'visible'
+    );
+    expect(document.activeElement).toBe(opener);
+});
+
+it('offers a readable retry when loading the table list times out', async () => {
+    const { fetch } = await sharingPanel();
+    fetch.mockRejectedValueOnce(
+        new DOMException('signal is aborted without reason', 'AbortError')
+    );
+    await document.querySelector('#erd-layout-action').onclick();
+    expect(document.querySelector('#erd-layout-status').textContent).toContain(
+        '다시 시도'
+    );
+    const retry = document.querySelector('#erd-layout-retry');
+    expect(retry.hidden).toBe(false);
+    await retry.onclick();
+    expect(retry.hidden).toBe(true);
+    expect(
+        document.querySelectorAll('#erd-layout-picker [data-table]')
+    ).toHaveLength(2);
+});
+
+it('accumulates canvas picks into chips, keeps them on blank clicks and removes them explicitly without loops', async () => {
+    const received = [];
+    const listener = (event) => received.push(event.detail);
+    window.addEventListener('keeperd-layout-selection', listener);
+    const fromCanvas = (diagramId, keys) =>
+        window.dispatchEvent(
+            new CustomEvent('keeperd-canvas-selection', {
+                detail: { diagramId, keys },
+            })
+        );
+    try {
+        await sharingPanel();
+        expect(received).toContainEqual({
+            diagramId: 'debut-main',
+            read: true,
+        });
+        received.length = 0;
+        document
+            .querySelector('#erd-layout-picker [data-schema="public"]')
+            .click();
+        expect(received).toEqual([
+            {
+                diagramId: 'debut-main',
+                keys: ['["public","users"]'],
+                active: true,
+            },
+        ]);
+        document.querySelector('#erd-layout-focus').click();
+        expect(received.at(-1)).toEqual({
+            diagramId: 'debut-main',
+            keys: ['["public","users"]'],
+            focus: true,
+        });
+        received.length = 0;
+        fromCanvas('different', ['["audit","users"]']);
+        fromCanvas('debut-main', []);
+        expect(
+            document.querySelector('#erd-layout-export-selected').textContent
+        ).toBe('1개 테이블 내보내기');
+        expect(received).toHaveLength(0);
+        fromCanvas('debut-main', ['["audit","users"]']);
+        expect(
+            document.querySelector('#erd-layout-export-selected').textContent
+        ).toBe('2개 테이블 내보내기');
+        expect(
+            document.querySelectorAll('#erd-layout-picker [role=listitem]')
+        ).toHaveLength(2);
+        expect(received).toEqual([
+            {
+                diagramId: 'debut-main',
+                keys: ['["public","users"]', '["audit","users"]'],
+                active: true,
+            },
+        ]);
+        fromCanvas('debut-main', ['["audit","users"]']);
+        fromCanvas('debut-main', []);
+        expect(received).toHaveLength(1);
+        document
+            .querySelector('#erd-layout-picker [data-remove-table]')
+            .click();
+        expect(
+            document.querySelector('#erd-layout-export-selected').textContent
+        ).toBe('1개 테이블 내보내기');
+        expect(received.at(-1).keys).toEqual(['["audit","users"]']);
+        document
+            .querySelector('#erd-layout-picker .erd-layout-chip-name')
+            .click();
+        expect(received.at(-1)).toEqual({
+            diagramId: 'debut-main',
+            keys: ['["audit","users"]'],
+            focus: true,
+        });
+        document.querySelector('#erd-layout-close').click();
+        expect(received.at(-1)).toEqual({
+            diagramId: 'debut-main',
+            active: false,
+        });
+        fromCanvas('debut-main', ['["public","users"]']);
+        expect(
+            document.querySelector('#erd-layout-export-selected').textContent
+        ).toBe('1개 테이블 내보내기');
+    } finally {
+        window.removeEventListener('keeperd-layout-selection', listener);
+    }
+});
+
+it('adopts the existing canvas selection on open and publishes the basket once for highlighting', async () => {
+    const commands = [];
+    const listener = (event) => {
+        commands.push(event.detail);
+        if (event.detail.read)
+            window.dispatchEvent(
+                new CustomEvent('keeperd-canvas-selection', {
+                    detail: {
+                        diagramId: 'debut-main',
+                        keys: ['["public","users"]'],
+                    },
+                })
+            );
+    };
+    window.addEventListener('keeperd-layout-selection', listener);
+    try {
+        await sharingPanel();
+        expect(commands).toEqual([
+            { diagramId: 'debut-main', read: true },
+            {
+                diagramId: 'debut-main',
+                keys: ['["public","users"]'],
+                active: true,
+            },
+        ]);
+        expect(
+            document.querySelector('#erd-layout-export-selected').textContent
+        ).toBe('1개 테이블 내보내기');
+    } finally {
+        window.removeEventListener('keeperd-layout-selection', listener);
+    }
+});
+
+it('turns off canvas target highlights outside table export mode and restores the same basket when returning', async () => {
+    await sharingPanel();
+    const listener = vi.fn();
+    window.addEventListener('keeperd-layout-selection', listener);
+    try {
+        document
+            .querySelector('#erd-layout-picker [data-schema="public"]')
+            .click();
+        document.querySelector('#erd-layout-tab-import').click();
+        expect(listener.mock.calls.at(-1)[0].detail.active).toBe(false);
+        window.dispatchEvent(
+            new CustomEvent('keeperd-canvas-selection', {
+                detail: {
+                    diagramId: 'debut-main',
+                    keys: ['["audit","users"]'],
+                },
+            })
+        );
+        document.querySelector('#erd-layout-tab-export').click();
+        expect(listener.mock.calls.at(-1)[0].detail).toEqual({
+            diagramId: 'debut-main',
+            keys: ['["public","users"]'],
+            active: true,
+        });
+        document
+            .querySelector('input[name=erd-layout-scope][value=all]')
+            .click();
+        expect(listener.mock.calls.at(-1)[0].detail.active).toBe(false);
+        document
+            .querySelector('input[name=erd-layout-scope][value=selected]')
+            .click();
+        expect(listener.mock.calls.at(-1)[0].detail.active).toBe(true);
+        document.querySelector('#erd-layout-picker [data-clear]').click();
+        expect(
+            document.querySelectorAll('#erd-layout-picker [role=listitem]')
+        ).toHaveLength(0);
+        expect(listener.mock.calls.at(-1)[0].detail.keys).toEqual([]);
+    } finally {
+        window.removeEventListener('keeperd-layout-selection', listener);
+    }
+});
+
+it('toggles a canvas table off and back on without dropping other shared tables', async () => {
+    await sharingPanel();
+    const listener = vi.fn();
+    window.addEventListener('keeperd-layout-selection', listener);
+    const toggle = (key) =>
+        window.dispatchEvent(
+            new CustomEvent('keeperd-canvas-selection', {
+                detail: { diagramId: 'debut-main', keys: [key], toggle: true },
+            })
+        );
+    try {
+        toggle('["public","users"]');
+        toggle('["audit","users"]');
+        expect(
+            document.querySelectorAll('#erd-layout-picker [role=listitem]')
+        ).toHaveLength(2);
+        toggle('["public","users"]');
+        expect(
+            document.querySelectorAll('#erd-layout-picker [role=listitem]')
+        ).toHaveLength(1);
+        expect(listener.mock.calls.at(-1)[0].detail.keys).toEqual([
+            '["audit","users"]',
+        ]);
+        toggle('["public","users"]');
+        expect(
+            document.querySelectorAll('#erd-layout-picker [role=listitem]')
+        ).toHaveLength(2);
+        toggle('["audit","users"]');
+        toggle('["public","users"]');
+        expect(
+            document.querySelector('#erd-layout-export-selected').disabled
+        ).toBe(true);
+        expect(listener.mock.calls.at(-1)[0].detail.keys).toEqual([]);
+    } finally {
+        window.removeEventListener('keeperd-layout-selection', listener);
+    }
 });

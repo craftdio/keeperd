@@ -27,6 +27,47 @@ async function client() {
     delete globalThis[Symbol.for('keeperd.workspace-client')];
     return import('./workspace-client.js');
 }
+
+it('continues saving after all tables in a partial restore have been removed', async () => {
+    const api = await client();
+    await api.readWorkspace();
+    await api.writeWorkspace('applyTableLayout', {
+        id: diagram.id,
+        package: {
+            format: 'keeperd-table-layout',
+            version: 1,
+            repository: { url: 'https://github.com/example/backend' },
+            layout: {
+                tables: [
+                    {
+                        schema: null,
+                        name: 'users',
+                        x: 500,
+                        y: 20,
+                        color: 'green',
+                        width: null,
+                        expanded: null,
+                        order: null,
+                    },
+                ],
+            },
+        },
+    });
+    const backupId = fixture.store
+        .view()
+        .backups.find((b) => b.kind === 'layout-partial').id;
+    await api.writeWorkspace('deleteTable', { id: 'users' });
+    const before = fixture.store.view();
+    await expect(
+        api.writeWorkspace('restoreTableLayout', { id: diagram.id, backupId })
+    ).resolves.toBeUndefined();
+    expect(fixture.store.view()).toEqual(before);
+    await expect(
+        api.writeWorkspace('updateConfig', { selectedTab: 'tables' })
+    ).resolves.toBeUndefined();
+    expect((await api.readWorkspace()).config.selectedTab).toBe('tables');
+    expect(fixture.store.view().diagrams[0].tables).toEqual([]);
+});
 beforeEach(() => {
     fixture = sqliteWorkspaceFixture();
     fixture.store.syncSnapshots({
@@ -75,6 +116,126 @@ afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete globalThis[Symbol.for('keeperd.workspace-client')];
+});
+
+function scopedServer() {
+    fetch.mockImplementation(async (url, options = {}) => {
+        calls.push({ url, options });
+        const input = options.body && JSON.parse(options.body);
+        const raw = new URL(url, 'http://localhost').searchParams.get(
+            'selection'
+        );
+        try {
+            const value = input
+                ? fixture.store.mutate(input)
+                : fixture.store.view(raw ? JSON.parse(raw) : undefined);
+            return {
+                ok: true,
+                json: async () => JSON.parse(JSON.stringify(value)),
+            };
+        } catch (error) {
+            return {
+                ok: false,
+                json: async () => ({ code: error.code, error: error.message }),
+            };
+        }
+    });
+}
+
+it('uses scoped reads and receipts, invalidates caches after saves and clones only the requested value', async () => {
+    scopedServer();
+    const api = await client();
+    const storage = (
+        await import('../../src/context/storage-context/server-storage')
+    ).createServerStorage();
+    await storage.getConfig();
+    const metadata = await storage.listDiagrams();
+    expect(metadata[0].tables).toBeUndefined();
+    const loaded = await storage.getDiagram(diagram.id, {
+        includeTables: true,
+        includeRelationships: true,
+        includeDependencies: true,
+        includeAreas: true,
+        includeCustomTypes: true,
+        includeNotes: true,
+    });
+    const before = calls.length;
+    loaded.tables[0].x = -1;
+    expect(
+        (await storage.getTable({ diagramId: diagram.id, id: 'users' })).x
+    ).toBe(100);
+    expect(calls).toHaveLength(before);
+    await storage.updateTable({ id: 'users', attributes: { x: 450 } });
+    expect(JSON.parse(calls.at(-1).options.body).response).toBe('ack-v1');
+    expect(
+        (await storage.getTable({ diagramId: diagram.id, id: 'users' })).x
+    ).toBe(450);
+    expect(
+        calls
+            .filter((c) => !c.options.body)
+            .every((c) => c.url.includes('selection='))
+    ).toBe(true);
+    expect((await api.readWorkspace()).diagrams).toHaveLength(1);
+    expect(calls.at(-1).url).toBe('/api/workspace');
+});
+
+it('finishes an in-flight scoped read before a queued write and keeps revision conflicts fatal', async () => {
+    scopedServer();
+    const api = await client();
+    await api.readWorkspace({ selection: { kind: 'config' } });
+    const serve = fetch.getMockImplementation();
+    let release, started;
+    const ready = new Promise((resolve) => {
+        started = resolve;
+    });
+    const gate = new Promise((resolve) => {
+        release = resolve;
+    });
+    fetch.mockImplementationOnce(async (...args) => {
+        const response = await serve(...args);
+        started();
+        await gate;
+        return response;
+    });
+    const reading = api.readWorkspace({
+        selection: {
+            kind: 'collection',
+            diagramId: diagram.id,
+            collection: 'tables',
+        },
+    });
+    await ready;
+    const writing = api.writeWorkspace('updateTable', {
+        id: 'users',
+        attributes: { x: 700 },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(calls.filter((c) => c.options.body)).toHaveLength(0);
+    release();
+    expect((await reading)[0].x).toBe(100);
+    await writing;
+    expect(
+        (
+            await api.readWorkspace({
+                selection: {
+                    kind: 'collection',
+                    diagramId: diagram.id,
+                    collection: 'tables',
+                },
+            })
+        )[0].x
+    ).toBe(700);
+    fixture.store.mutate({
+        revision: fixture.store.view().revision,
+        action: 'updateConfig',
+        params: { selectedTab: 'notes' },
+    });
+    await expect(
+        api.readWorkspace({ refresh: true, selection: { kind: 'config' } })
+    ).rejects.toThrow('새로고침');
+    await expect(api.writeWorkspace('updateConfig', {})).rejects.toThrow(
+        '추가 저장을 중지'
+    );
 });
 
 async function seedLegacy(original, extra = {}) {

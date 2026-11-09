@@ -52,7 +52,21 @@ function fixture(version = '0.1.0') {
             'utf8'
         )
     );
+    write(
+        'tools/local-erd/layout-package.js',
+        readFileSync(
+            path.join(sourceRoot, 'tools/local-erd/layout-package.js'),
+            'utf8'
+        )
+    );
     write('tools/local-erd/server.mjs', 'runtime server');
+    write(
+        'tools/local-erd/workspace-selection.js',
+        readFileSync(
+            path.join(sourceRoot, 'tools/local-erd/workspace-selection.js'),
+            'utf8'
+        )
+    );
     write('tools/local-erd/stop.mjs', 'runtime stop client');
     write('tools/local-erd/stop-control.mjs', 'runtime stop proof');
     write('tools/local-erd/open-browser.mjs', 'runtime browser opener');
@@ -123,6 +137,8 @@ test('creates a portable runtime archive with a source-controlled version and ch
             'bin/keeperd.mjs',
             'dist/index.html',
             'tools/local-erd/server.mjs',
+            'tools/local-erd/layout-package.js',
+            'tools/local-erd/workspace-selection.js',
             'tools/local-erd/stop.mjs',
             'tools/local-erd/stop-control.mjs',
             'tools/local-erd/open-browser.mjs',
