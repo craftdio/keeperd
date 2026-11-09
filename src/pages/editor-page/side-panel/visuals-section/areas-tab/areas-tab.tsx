@@ -8,14 +8,14 @@ import { useLayout } from '@/hooks/use-layout';
 import { EmptyState } from '@/components/empty-state/empty-state';
 import { ScrollArea } from '@/components/scroll-area/scroll-area';
 import { useTranslation } from 'react-i18next';
-import { useViewport } from '@xyflow/react';
+import { useReactFlow } from '@xyflow/react';
 import { AreaList } from './areas-list/areas-list';
 
 export interface AreasTabProps {}
 
 export const AreasTab: React.FC<AreasTabProps> = () => {
     const { createArea, areas, readonly } = useChartDB();
-    const viewport = useViewport();
+    const { getViewport } = useReactFlow();
     const { t } = useTranslation();
     const { openAreaFromSidebar } = useLayout();
     const [filterText, setFilterText] = React.useState('');
@@ -30,6 +30,7 @@ export const AreasTab: React.FC<AreasTabProps> = () => {
     }, [areas, filterText]);
 
     const createAreaWithLocation = useCallback(async () => {
+        const viewport = getViewport();
         const padding = 80;
         const centerX = -viewport.x / viewport.zoom + padding / viewport.zoom;
         const centerY = -viewport.y / viewport.zoom + padding / viewport.zoom;
@@ -40,13 +41,7 @@ export const AreasTab: React.FC<AreasTabProps> = () => {
         if (openAreaFromSidebar) {
             openAreaFromSidebar(area.id);
         }
-    }, [
-        createArea,
-        openAreaFromSidebar,
-        viewport.x,
-        viewport.y,
-        viewport.zoom,
-    ]);
+    }, [createArea, openAreaFromSidebar, getViewport]);
 
     const handleCreateArea = useCallback(async () => {
         setFilterText('');

@@ -11,7 +11,8 @@ import {
 import { useBreakpoint } from '@/hooks/use-breakpoint';
 import { useChartDB } from '@/hooks/use-chartdb';
 import { useDialog } from '@/hooks/use-dialog';
-import { useReactFlow, useStore } from '@xyflow/react';
+import { useReactFlow } from '@xyflow/react';
+import { useSelectedTableIds } from './use-selected-table-ids';
 import React, { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -59,11 +60,7 @@ export const CanvasContextMenu: React.FC<React.PropsWithChildren> = ({
     const { isMd: isDesktop } = useBreakpoint('md');
 
     // Reactively detect selected tables
-    const selectedTableIds = useStore((state) =>
-        state.nodes
-            .filter((n) => n.type === 'table' && n.selected && !n.hidden)
-            .map((n) => n.id)
-    );
+    const selectedTableIds = useSelectedTableIds();
     const hasSelectedTables = selectedTableIds.length > 0;
 
     const createTableHandler = useCallback(

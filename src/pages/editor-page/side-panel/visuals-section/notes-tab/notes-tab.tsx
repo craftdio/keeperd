@@ -8,14 +8,14 @@ import { useLayout } from '@/hooks/use-layout';
 import { EmptyState } from '@/components/empty-state/empty-state';
 import { ScrollArea } from '@/components/scroll-area/scroll-area';
 import { useTranslation } from 'react-i18next';
-import { useViewport } from '@xyflow/react';
+import { useReactFlow } from '@xyflow/react';
 import { NotesList } from './notes-list/notes-list';
 
 export interface NotesTabProps {}
 
 export const NotesTab: React.FC<NotesTabProps> = () => {
     const { createNote, notes, readonly } = useChartDB();
-    const viewport = useViewport();
+    const { getViewport } = useReactFlow();
     const { t } = useTranslation();
     const { openNoteFromSidebar } = useLayout();
     const [filterText, setFilterText] = React.useState('');
@@ -30,6 +30,7 @@ export const NotesTab: React.FC<NotesTabProps> = () => {
     }, [notes, filterText]);
 
     const createNoteWithLocation = useCallback(async () => {
+        const viewport = getViewport();
         const padding = 80;
         const centerX = -viewport.x / viewport.zoom + padding / viewport.zoom;
         const centerY = -viewport.y / viewport.zoom + padding / viewport.zoom;
@@ -40,13 +41,7 @@ export const NotesTab: React.FC<NotesTabProps> = () => {
         if (openNoteFromSidebar) {
             openNoteFromSidebar(note.id);
         }
-    }, [
-        createNote,
-        openNoteFromSidebar,
-        viewport.x,
-        viewport.y,
-        viewport.zoom,
-    ]);
+    }, [createNote, openNoteFromSidebar, getViewport]);
 
     const handleCreateNote = useCallback(async () => {
         setFilterText('');
