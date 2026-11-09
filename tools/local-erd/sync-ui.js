@@ -8,10 +8,14 @@ import {
     checkLayoutCompatibility,
     exportLayoutPackage,
     hasLayoutBackup,
+    layoutTableCatalog,
     parseLayoutPackage,
+    previewLayoutPackage,
     restoreLayoutBackup,
     snapshotLayoutSource,
 } from './layout-transfer.js';
+import { isPartialLayoutPackage } from './layout-package.js';
+import { createLayoutTablePicker } from './layout-table-picker.js';
 
 const icon =
     '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.55-2.55L20 7M4 17l2.35 2.55A7 7 0 0 0 17.9 17"/></svg>';
@@ -64,11 +68,144 @@ if (!home) {
 document.body.append(panel);
 const layoutPanel = document.createElement('div');
 layoutPanel.id = 'erd-layout-panel';
-layoutPanel.innerHTML =
-    '<section role="dialog" aria-modal="true" aria-labelledby="erd-layout-title"><h2 id="erd-layout-title">레포 공통 ERD 작업 데이터</h2><p id="erd-layout-source"></p><p class="erd-layout-help">스키마는 변경하지 않고 이 레포의 테이블 배치·크기·색상과 Area·메모만 JSON으로 공유합니다. 같은 이름의 테이블은 모든 브랜치에서 같은 작업 데이터를 사용합니다.</p><p id="erd-layout-status" role="status" aria-live="polite"></p><input id="erd-layout-file" type="file" accept=".json,application/json" hidden><div class="erd-layout-actions"><button id="erd-layout-export" type="button">레포 공통 작업 데이터 JSON 내보내기</button><button id="erd-layout-import" type="button">레포 공통 JSON 파일 선택</button><button id="erd-layout-apply" class="primary" type="button" hidden>이 레포에 적용</button><button id="erd-layout-restore" type="button" hidden>직전 적용 되돌리기</button></div><button id="erd-layout-close" class="close" type="button">닫기</button></section>';
+layoutPanel.innerHTML = `<section role="dialog" aria-labelledby="erd-layout-title" class="erd-layout-dialog" tabindex="-1">
+  <header class="erd-layout-header">
+    <div><div class="erd-layout-heading-line"><h2 id="erd-layout-title">배치 공유</h2><div id="erd-layout-branch"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="4" cy="3" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="4" cy="13" r="2"/><path d="M4 5v6m0-2c5 0 8-1 8-3"/></svg><span></span></div></div><div id="erd-layout-source"></div></div>
+    <button id="erd-layout-close" type="button" aria-label="공유 창 닫기"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg></button>
+  </header>
+  <div class="erd-layout-tabs" role="tablist" aria-label="공유 작업">
+    <button type="button" id="erd-layout-tab-export" role="tab" aria-selected="true" aria-controls="erd-layout-export-panel" data-layout-tab="export">내보내기</button>
+    <button type="button" id="erd-layout-tab-import" role="tab" aria-selected="false" aria-controls="erd-layout-import-panel" tabindex="-1" data-layout-tab="import">가져오기</button>
+  </div>
+  <div class="erd-layout-body">
+    <div id="erd-layout-export-panel" role="tabpanel" aria-labelledby="erd-layout-tab-export">
+      <div class="erd-layout-scope" role="group" aria-label="내보낼 범위">
+        <label><input type="radio" name="erd-layout-scope" value="selected" checked><span>테이블 선택</span></label>
+        <label><input type="radio" name="erd-layout-scope" value="all"><span>전체 작업 데이터</span></label>
+      </div>
+      <div id="erd-layout-picker"></div>
+      <div id="erd-layout-full-description" hidden><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><rect x="5" y="6" width="13" height="27" rx="3"/><rect x="23" y="13" width="12" height="20" rx="3"/><path d="M8 13h7M8 19h7M8 25h7M26 20h6M26 26h6"/></svg><h3>레포의 작업 데이터를 한 번에</h3><p>모든 테이블의 배치·색상과 Area·메모를 포함합니다.<br>테이블 구조와 컬럼·관계는 포함하지 않습니다.</p></div>
+    </div>
+    <div id="erd-layout-import-panel" role="tabpanel" aria-labelledby="erd-layout-tab-import" hidden>
+      <input id="erd-layout-file" type="file" accept=".json,application/json" hidden>
+      <button id="erd-layout-import" type="button" class="erd-layout-file-zone"><svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M14 18V4m-5 5 5-5 5 5M5 18v5h18v-5"/></svg><strong>JSON 파일 선택</strong><span>공유받은 배치 파일을 선택하세요 · 최대 5 MB</span></button>
+      <div id="erd-layout-import-preview" hidden><div class="erd-layout-file-name"><strong id="erd-layout-file-name"></strong><span id="erd-layout-import-kind"></span></div><dl class="erd-layout-import-stats"><div><dt>파일의 테이블</dt><dd id="erd-layout-count-total">0</dd></div><div><dt>적용 가능</dt><dd id="erd-layout-count-matched">0</dd></div><div><dt>건너뜀</dt><dd id="erd-layout-count-skipped">0</dd></div></dl><p id="erd-layout-import-help"></p></div>
+    </div>
+    <div class="erd-layout-status-line"><p id="erd-layout-status" role="status" aria-live="polite" hidden></p><button id="erd-layout-retry" type="button" hidden>다시 불러오기</button></div>
+  </div>
+  <footer class="erd-layout-footer">
+    <div id="erd-layout-export-footer"><div><strong id="erd-layout-export-summary">테이블을 선택하세요</strong><button id="erd-layout-focus" type="button" class="text-button" disabled>선택한 테이블 보기 ↗</button><small id="erd-layout-export-help">배치만 공유하며 컬럼·관계는 포함하지 않습니다.</small></div><button id="erd-layout-export-selected" class="primary" type="button" disabled>선택 후 내보내기</button><button id="erd-layout-export" class="primary" type="button" hidden>전체 배치 내보내기</button></div>
+    <div id="erd-layout-import-footer" hidden><button id="erd-layout-restore" class="text-button" type="button" hidden>직전 가져오기 되돌리기</button><button id="erd-layout-apply" class="primary" type="button" hidden>배치 적용</button></div>
+  </footer>
+</section>
+`;
 document.body.append(layoutPanel);
-style.textContent +=
-    '#erd-layout-panel{display:none;position:fixed;inset:0;z-index:100003;background:#080f1bd9;place-items:center;font:14px system-ui;color:#e2e8f0}#erd-layout-panel.visible{display:grid}#erd-layout-panel section{box-sizing:border-box;width:min(520px,calc(100vw - 40px));padding:26px;background:#111c2e;border:1px solid #475569;border-radius:16px;box-shadow:0 24px 80px #0009}#erd-layout-panel h2{margin:0 0 10px;font-size:20px}#erd-layout-panel p{line-height:1.6;color:#aebbd0}#erd-layout-source{padding:10px 12px;border-radius:9px;background:#0b1425;color:#c7d2fe!important;overflow-wrap:anywhere}.erd-layout-help{font-size:12px}#erd-layout-status{min-height:42px;padding:10px 12px;border:1px solid #334155;border-radius:9px;background:#0b1425;color:#e2e8f0!important}#erd-layout-status.error{border-color:#be123c;color:#fecdd3!important}#erd-layout-status.success{border-color:#16a34a;color:#bbf7d0!important}.erd-layout-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}#erd-layout-panel button{border:1px solid #475569;background:#25324a;color:white;padding:10px 12px;border-radius:8px;font:inherit;cursor:pointer}#erd-layout-panel button:hover:not(:disabled){border-color:#818cf8;background:#334155}#erd-layout-panel button.primary{grid-column:1/-1;background:#4f46e5;border-color:#6366f1;font-weight:650}#erd-layout-panel button:disabled{opacity:.6;cursor:wait}#erd-layout-panel button.close{display:block;margin:16px 0 0 auto;background:transparent}';
+style.textContent += `#erd-layout-panel{display:none;position:fixed;top:58px;right:18px;bottom:18px;z-index:100003;pointer-events:none;box-sizing:border-box;color:#e8e9f0;font:13px/1.5 system-ui;--layout-muted:#9399aa;--layout-line:#303442;--layout-accent:#a69aff;color-scheme:dark}
+#erd-layout-panel.visible{display:block}
+#erd-layout-panel [hidden]{display:none!important}
+#erd-layout-panel .erd-layout-dialog{display:flex;flex-direction:column;pointer-events:auto;width:min(460px,calc(100vw - 36px));height:100%;max-height:100%;overflow:hidden;box-sizing:border-box;background:#171a23;border:1px solid #363b4d;border-radius:18px;box-shadow:0 24px 90px #0009}
+#erd-layout-panel button,#erd-layout-panel input,#erd-layout-panel select{font:inherit}
+#erd-layout-panel button{border:1px solid transparent;background:none;color:inherit;cursor:pointer;border-radius:7px;transition:background .12s,border-color .12s}
+#erd-layout-panel button:hover:not(:disabled){background:#ffffff0a}
+#erd-layout-panel button:disabled{opacity:.4;cursor:not-allowed}
+#erd-layout-panel :focus-visible{outline:2px solid var(--layout-accent);outline-offset:2px}
+#erd-layout-panel input[type=checkbox]{width:15px;height:15px;flex:none;margin:0;accent-color:var(--layout-accent);cursor:pointer}
+.erd-layout-header{display:flex;align-items:flex-start;justify-content:space-between;padding:18px 24px 10px;gap:16px}.erd-layout-header>div{min-width:0}.erd-layout-heading-line{display:flex;align-items:center;gap:12px;min-width:0}
+#erd-layout-panel h2{font-size:20px;letter-spacing:-.5px;line-height:1.3;margin:0;font-weight:650;white-space:nowrap}
+.erd-layout-header p{margin:7px 0 0;color:var(--layout-muted);font-size:12px}
+#erd-layout-close{width:30px;height:30px;display:grid;place-items:center;flex:none;color:var(--layout-muted)!important}
+#erd-layout-close svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.5}
+#erd-layout-source{margin-top:7px;color:#929bad;font-size:11px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+#erd-layout-branch{display:flex;align-items:center;gap:5px;min-width:0;max-width:240px;padding:3px 8px;border:1px solid #a69aff30;background:#a69aff10;color:#c4baff;border-radius:6px;font-size:11px}
+#erd-layout-branch svg{width:14px;height:14px;stroke:currentColor;stroke-width:1.3;flex:none}
+#erd-layout-branch span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.erd-layout-tabs{display:flex;gap:24px;margin:0 24px;border-bottom:1px solid var(--layout-line)}
+#erd-layout-panel .erd-layout-tabs button{padding:10px 1px;border-radius:0;color:var(--layout-muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+#erd-layout-panel .erd-layout-tabs button[aria-selected=true]{color:#e4dfff;border-bottom-color:var(--layout-accent);font-weight:600}
+.erd-layout-body{display:flex;flex-direction:column;padding:14px 24px;overflow:auto;flex:1;min-height:0;scrollbar-width:thin;scrollbar-color:#414655 transparent}
+#erd-layout-export-panel:not([hidden]){display:flex;flex-direction:column;flex:1;min-height:0}
+#erd-layout-picker{display:flex;flex-direction:column;flex:1;min-height:300px}
+.erd-layout-scope{display:flex;flex-shrink:0;width:fit-content;border:1px solid var(--layout-line);border-radius:8px;padding:3px;margin-bottom:12px;background:#11141c;gap:3px}
+.erd-layout-scope label{position:relative;cursor:pointer;white-space:nowrap}
+.erd-layout-scope input{position:absolute;opacity:0;width:1px;height:1px}
+.erd-layout-scope span{display:block;padding:6px 12px;border-radius:5px;color:var(--layout-muted);font-size:12px}
+.erd-layout-scope label:has(input:checked) span{background:#303244;color:#eeeaff;box-shadow:0 1px 3px #0004}
+.erd-layout-scope label:has(input:focus-visible){outline:2px solid var(--layout-accent);outline-offset:2px;border-radius:5px}
+.erd-layout-selection{flex:none;border:1px solid #a69aff2b;background:#a69aff09;border-radius:9px;padding:10px 11px;margin-bottom:12px}
+.erd-layout-selection-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;font-size:12px}
+.erd-layout-selection-heading strong{font-weight:600;color:#e0d9ff;display:flex;align-items:center;gap:6px}
+[data-basket-count]{background:#b4a2ff24;color:#d9ceff;padding:0 5px;border-radius:4px;font-size:11px;font-variant-numeric:tabular-nums}
+#erd-layout-panel [data-basket-empty]{font-size:11px;color:#8e96aa;margin:0;line-height:1.5}
+.erd-layout-selection-chips{display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;max-height:90px;overflow:auto;scrollbar-width:thin;scrollbar-color:#514a70 transparent;padding:2px}
+.erd-layout-selection-chip{display:flex;align-items:center;gap:2px;max-width:100%;min-width:0;border:1px solid #a69aff45;border-radius:6px;background:#a69aff13;color:#dfd7ff;font:11px ui-monospace,SFMono-Regular,Consolas,monospace}
+#erd-layout-panel .erd-layout-chip-name{padding:4px 5px 4px 7px;color:inherit;font:inherit;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:left}
+#erd-layout-panel [data-remove-table]{flex:none;display:grid;place-items:center;width:23px;height:24px;padding:0;font:16px/1 system-ui;color:#bcb0e3;border-left:1px solid #a69aff1a;border-radius:0 5px 5px 0}
+#erd-layout-panel [data-remove-table]:hover{background:#a69aff2b;color:#fff}
+.erd-layout-list-hint{color:#717b91;font-size:10px}
+.erd-layout-search{display:flex;flex-shrink:0;gap:9px;align-items:center;padding:0 11px;height:38px;border:1px solid #3a4050;border-radius:8px;background:#11141c}
+.erd-layout-search:focus-within{border-color:var(--layout-accent);box-shadow:0 0 0 2px #a69aff15}
+.erd-layout-search svg{width:16px;height:16px;stroke:#8c94a7;stroke-width:1.5;flex:none}
+#erd-layout-panel .erd-layout-search input{width:100%;min-width:0;background:none;border:0;color:#f1f2f5;padding:8px 0;outline:none}
+.erd-layout-search input::placeholder{color:#757d91}
+.erd-layout-list-filters{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0}
+#erd-layout-panel [data-current-count]{color:#a2aabc;font-size:12px}
+#erd-layout-panel [data-selected-only]{display:flex;align-items:center;gap:6px;padding:5px 8px;color:var(--layout-muted);font-size:12px}
+#erd-layout-panel [data-selected-only] span{font-size:11px;min-width:16px;text-align:center;border-radius:4px;background:#ffffff0b;color:#c9cddd;padding:0 3px}
+#erd-layout-panel [data-selected-only][aria-pressed=true]{background:#a69aff17;color:#c9beff}
+.erd-layout-list-toolbar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border:1px solid var(--layout-line);border-bottom:0;border-radius:8px 8px 0 0;background:#1d212c;font-size:12px;color:#adb4c5}
+.erd-layout-list-toolbar label{display:flex;align-items:center;gap:10px;cursor:pointer}
+#erd-layout-panel [data-clear]{font-size:11px;color:#b9b0ed;padding:0 4px}
+.erd-layout-table-list{flex:1;min-height:80px;overflow:auto;background:#131620;border:1px solid var(--layout-line);border-radius:0 0 8px 8px;scrollbar-width:thin;scrollbar-color:#414655 transparent;overscroll-behavior:contain}
+.erd-layout-table-list.loading{display:grid;place-items:center;color:var(--layout-muted)}
+.erd-layout-table-list::-webkit-scrollbar,.erd-layout-body::-webkit-scrollbar{width:7px}
+.erd-layout-table-list::-webkit-scrollbar-thumb,.erd-layout-body::-webkit-scrollbar-thumb{background:#414655;border-radius:8px;border:2px solid #131620}
+.erd-layout-schema-heading{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:10px;padding:8px 12px;background:#1c202b;border-bottom:1px solid #272d3b;color:#c5cad9;font-size:11px;font-weight:600;cursor:pointer}
+#erd-layout-panel .erd-layout-schema-heading button{display:flex;align-items:center;gap:8px;flex:1;min-width:0;padding:0;color:inherit;text-align:left;font:inherit}
+.erd-layout-schema-heading button>span:first-child{font-size:19px;line-height:14px;transition:transform .12s}
+.erd-layout-schema-heading button[aria-expanded=true]>span:first-child{transform:rotate(90deg)}
+.erd-layout-schema-heading button>span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.erd-layout-schema-heading small{color:#7e879a;font-weight:400;margin-left:2px}
+.erd-layout-table-row{display:flex;align-items:center;gap:10px;height:35px;padding:0 12px 0 30px;cursor:pointer;border-bottom:1px solid #ffffff04;transition:background .12s}
+.erd-layout-table-row:hover{background:#ffffff05}
+.erd-layout-table-row:has(input:checked){background:#a69aff0e;color:#e1dbff}
+.erd-layout-table-row span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:13px ui-monospace,SFMono-Regular,Consolas,monospace;min-width:0}
+#erd-layout-panel .erd-layout-pick-count{margin:8px 0 0;min-height:17px;color:#7e879a;font-size:11px}
+.erd-layout-empty-list{display:grid;place-items:center;height:100%;padding:20px;box-sizing:border-box;color:var(--layout-muted);text-align:center}
+#erd-layout-full-description{display:grid;justify-items:center;text-align:center;padding:40px 12px 50px;color:var(--layout-muted);min-height:220px;box-sizing:border-box}
+#erd-layout-full-description svg{width:44px;height:44px;stroke:#aca1f3;stroke-width:1.3;margin-bottom:14px}
+#erd-layout-full-description h3{margin:0 0 7px;font-size:15px;color:#e5e6ef;font-weight:600}
+#erd-layout-full-description p{margin:0;line-height:1.8;font-size:12px}
+.erd-layout-footer{flex:none;padding:12px 24px;border-top:1px solid var(--layout-line);background:#1b1e28}
+#erd-layout-export-footer,#erd-layout-import-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;min-height:38px}
+#erd-layout-export-footer{display:grid;grid-template-columns:1fr}
+#erd-layout-export-footer>.primary{width:100%}
+#erd-layout-export-footer strong{display:inline-block;font-size:12px;font-weight:600;color:#d4d8e4}
+#erd-layout-focus{float:right;padding:0!important;font-size:11px!important;color:#b9adff!important}
+#erd-layout-export-footer small{display:block;font-size:11px;color:#858da0;margin-top:3px}
+#erd-layout-panel button.primary{padding:10px 16px;background:#a397f5;border:1px solid #b5aafa;color:#171225;white-space:nowrap;font-weight:650;box-shadow:0 1px 2px #0003}
+#erd-layout-panel button.primary:hover:not(:disabled){background:#b4a9ff}
+#erd-layout-panel button.primary:disabled{background:#343343;border-color:#464254;color:#a5a0b7;opacity:1;box-shadow:none}
+#erd-layout-panel .text-button{padding:8px 0;color:#979fb2;font-size:12px}
+#erd-layout-panel .erd-layout-file-zone{width:100%;display:flex;flex-direction:column;align-items:center;gap:9px;padding:32px 20px;border:1px dashed #4b5264;border-radius:10px;background:#131620}
+.erd-layout-file-zone svg{height:28px;width:28px;stroke:#b2a6fc;stroke-width:1.4;margin-bottom:5px}
+.erd-layout-file-zone strong{font-size:13px;font-weight:600}
+.erd-layout-file-zone span{font-size:11px;color:var(--layout-muted)}
+.erd-layout-file-name{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:18px 0 10px;font-size:12px}
+.erd-layout-file-name strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.erd-layout-file-name span{font-size:11px;color:var(--layout-muted);white-space:nowrap}
+.erd-layout-import-stats{display:grid;grid-template-columns:repeat(3,1fr);margin:0;padding:14px 0;border-block:1px solid var(--layout-line)}
+.erd-layout-import-stats div{text-align:center;border-right:1px solid var(--layout-line)}
+.erd-layout-import-stats div:last-child{border:0}
+.erd-layout-import-stats dt{font-size:11px;color:var(--layout-muted)}
+.erd-layout-import-stats dd{font-size:23px;margin:4px 0 0;font-variant-numeric:tabular-nums}
+#erd-layout-count-matched{color:#b3dfc8}
+#erd-layout-import-help{font-size:12px;color:#a3aabb;line-height:1.8;margin:12px 0 0}
+#erd-layout-panel #erd-layout-status{font-size:12px;margin:12px 0 0;color:#b2b9ca}
+.erd-layout-status-line{display:flex;align-items:baseline;gap:12px}#erd-layout-panel #erd-layout-retry{white-space:nowrap;padding:4px 8px;color:var(--layout-accent);font-size:12px}
+#erd-layout-status.error{color:#fca5b0!important}
+#erd-layout-status.success{color:#a4dbc0!important}
+@media(max-width:520px){.erd-layout-header{padding:18px 18px 12px}.erd-layout-tabs{margin-inline:18px}#erd-layout-source{max-width:42vw}.erd-layout-body{padding:14px 18px}.erd-layout-footer{flex:none;padding:14px 18px}#erd-layout-export-footer{align-items:flex-start;flex-direction:column;gap:12px}#erd-layout-export-footer button{width:100%}.erd-layout-table-row{padding-left:22px}.erd-layout-list-filters{gap:4px}.erd-layout-file-name{flex-direction:column;gap:4px}}
+`;
 style.textContent +=
     '#erd-layout-transition{position:fixed;inset:0;z-index:100004;display:grid;place-items:center;background:#080f1be8;color:#eef2ff;font:14px system-ui;opacity:1;transition:opacity .2s ease;pointer-events:all}#erd-layout-transition[hidden]{display:none}#erd-layout-transition.fade-out{opacity:0}#erd-layout-transition section{display:grid;justify-items:center;gap:14px;min-width:250px;padding:26px 30px;border:1px solid #475569;border-radius:16px;background:#111c2e;box-shadow:0 24px 80px #0009;text-align:center}#erd-layout-transition span{width:34px;height:34px;border:3px solid #818cf855;border-top-color:#a5b4fc;border-radius:50%;animation:erd-layout-spin .8s linear infinite}#erd-layout-transition small{color:#cbd5e1}@keyframes erd-layout-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){#erd-layout-transition span{animation:none;border-color:#a5b4fc}}';
 const layoutTransition = document.createElement('div');
@@ -198,8 +335,52 @@ let currentLayoutSource;
 let pendingLayoutPackage;
 const layoutSourceText = layoutPanel.querySelector('#erd-layout-source');
 const layoutStatus = layoutPanel.querySelector('#erd-layout-status');
+const layoutRetry = layoutPanel.querySelector('#erd-layout-retry');
 const layoutFile = layoutPanel.querySelector('#erd-layout-file');
 const layoutExport = layoutPanel.querySelector('#erd-layout-export');
+const layoutExportSelected = layoutPanel.querySelector(
+    '#erd-layout-export-selected'
+);
+let layoutIsBusy = false;
+let layoutLastDiagram;
+let layoutPreviousFocus;
+let layoutSelectionSignature;
+const layoutFocus = layoutPanel.querySelector('#erd-layout-focus');
+const layoutPickerRoot = layoutPanel.querySelector('#erd-layout-picker');
+const layoutSummary = layoutPanel.querySelector('#erd-layout-export-summary');
+const layoutExportHelp = layoutPanel.querySelector('#erd-layout-export-help');
+const layoutScopeInputs = [
+    ...layoutPanel.querySelectorAll('input[name="erd-layout-scope"]'),
+];
+const layoutTabs = [...layoutPanel.querySelectorAll('[data-layout-tab]')];
+const layoutPreview = layoutPanel.querySelector('#erd-layout-import-preview');
+
+const layoutPicker = createLayoutTablePicker(
+    layoutPickerRoot,
+    (count, keys) => {
+        layoutExportSelected.disabled = layoutIsBusy || count === 0;
+        layoutFocus.disabled = layoutIsBusy || count === 0;
+        layoutExportSelected.textContent = count
+            ? `${count}개 테이블 내보내기`
+            : '선택 후 내보내기';
+        if (layoutScopeInputs[0].checked)
+            layoutSummary.textContent = count
+                ? `${count}개 테이블 선택됨`
+                : '테이블을 선택하세요';
+        const signature = JSON.stringify([...keys].sort());
+        if (
+            !layoutIsBusy &&
+            layoutAcceptCanvasSelection &&
+            layoutPanel.classList.contains('visible') &&
+            layoutSelectionMode() &&
+            signature !== layoutSelectionSignature
+        ) {
+            layoutSelectionSignature = signature;
+            sendLayoutSelection({ keys, active: true });
+        }
+    },
+    { onFocusTable: (key) => sendLayoutSelection({ keys: [key], focus: true }) }
+);
 const layoutImport = layoutPanel.querySelector('#erd-layout-import');
 const layoutApply = layoutPanel.querySelector('#erd-layout-apply');
 const layoutRestore = layoutPanel.querySelector('#erd-layout-restore');
@@ -218,6 +399,7 @@ const compactLocalPath = (value) => {
     return `${parts[0]}/…/${last}`;
 };
 function setLayoutStatus(message, type = '') {
+    layoutStatus.hidden = !message;
     layoutStatus.textContent = message;
     layoutStatus.className = type;
 }
@@ -271,12 +453,17 @@ const showCurrentWorktree = (snapshot) =>
         '현재 ERD worktree'
     );
 function layoutBusy(value) {
+    for (const control of [...layoutScopeInputs, ...layoutTabs])
+        control.disabled = value;
+    layoutIsBusy = value;
+    layoutPicker.setBusy(value);
     for (const button of [
         layoutExport,
         layoutImport,
         layoutApply,
         layoutRestore,
         layoutClose,
+        layoutRetry,
     ])
         button.disabled = value;
 }
@@ -325,15 +512,15 @@ async function finishLayoutRefresh(message) {
     showLayoutTransition(message);
     await refreshAppliedDiagram();
     await new Promise((resolve) => requestAnimationFrame(resolve));
-    layoutPanel.classList.remove('visible');
+    closeLayoutPanel();
     await hideLayoutTransition();
 }
-function layoutFileName(source) {
+function layoutFileName(source, partial) {
     const slug = source.url
         .replace(/^https:\/\/github\.com\//, '')
         .replace(/\.git$/, '')
         .replace(/[^a-z0-9._-]+/gi, '-');
-    return `${slug}.keeperd-layout.json`;
+    return `${slug}.${partial ? 'keeperd-tables' : 'keeperd-layout'}.json`;
 }
 function downloadLayout(layoutPackage) {
     const link = document.createElement('a');
@@ -343,7 +530,10 @@ function downloadLayout(layoutPackage) {
         })
     );
     link.href = url;
-    link.download = layoutFileName(layoutPackage.repository);
+    link.download = layoutFileName(
+        layoutPackage.repository,
+        isPartialLayoutPackage(layoutPackage)
+    );
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -355,23 +545,187 @@ async function refreshLayoutRestore() {
         setLayoutStatus(error.message);
     }
 }
+let layoutAcceptCanvasSelection = false;
+function sendLayoutSelection(detail) {
+    window.dispatchEvent(
+        new CustomEvent('keeperd-layout-selection', {
+            detail: { diagramId: currentDiagramId(), ...detail },
+        })
+    );
+}
+function layoutSelectionMode() {
+    return (
+        layoutPanel.classList.contains('visible') &&
+        !layoutPickerRoot.hidden &&
+        layoutTabs[0].getAttribute('aria-selected') === 'true'
+    );
+}
+function syncLayoutSelectionMode() {
+    if (!layoutAcceptCanvasSelection || layoutIsBusy) return;
+    const active = layoutSelectionMode();
+    const keys = layoutPicker.selectedKeys();
+    layoutSelectionSignature = active
+        ? JSON.stringify([...keys].sort())
+        : undefined;
+    sendLayoutSelection({ keys, active });
+}
+window.addEventListener('keeperd-canvas-selection', (event) => {
+    if (
+        !layoutPanel.isConnected ||
+        !layoutSelectionMode() ||
+        !layoutAcceptCanvasSelection ||
+        event.detail?.diagramId !== currentDiagramId() ||
+        !Array.isArray(event.detail.keys) ||
+        !event.detail.keys.length
+    )
+        return;
+    // Node clicks explicitly toggle membership. Marquee/keyboard snapshots
+    // add a group; an empty canvas selection never discards the share basket.
+    const previous = layoutPicker.selectedKeys();
+    const next = new Set(previous);
+    for (const key of event.detail.keys) {
+        if (event.detail.toggle === true && next.has(key)) next.delete(key);
+        else next.add(key);
+    }
+    const keys = [...next];
+    if (
+        JSON.stringify([...keys].sort()) ===
+        JSON.stringify([...previous].sort())
+    )
+        return;
+    layoutPicker.setSelectedKeys(keys);
+});
+layoutFocus.onclick = () =>
+    sendLayoutSelection({ keys: layoutPicker.selectedKeys(), focus: true });
+function closeLayoutPanel() {
+    layoutAcceptCanvasSelection = false;
+    layoutSelectionSignature = undefined;
+    sendLayoutSelection({ active: false });
+    layoutPanel.classList.remove('visible');
+    if (layoutPreviousFocus?.isConnected) layoutPreviousFocus.focus();
+    else layoutButton?.focus();
+}
+function switchLayoutTab(mode) {
+    for (const tab of layoutTabs) {
+        const active = tab.dataset.layoutTab === mode;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+    }
+    for (const kind of ['export', 'import']) {
+        layoutPanel.querySelector(`#erd-layout-${kind}-panel`).hidden =
+            kind !== mode;
+        layoutPanel.querySelector(`#erd-layout-${kind}-footer`).hidden =
+            kind !== mode;
+    }
+    setLayoutStatus('');
+    syncLayoutSelectionMode();
+}
+function updateLayoutExportScope() {
+    const all = layoutScopeInputs[1].checked;
+    layoutPickerRoot.hidden = all;
+    layoutFocus.hidden = all;
+    layoutPanel.querySelector('#erd-layout-full-description').hidden = !all;
+    layoutExport.hidden = !all;
+    layoutExportSelected.hidden = all;
+    layoutSummary.textContent = all
+        ? '레포 전체의 배치·Area·메모'
+        : layoutPicker.selectedKeys().length
+          ? `${layoutPicker.selectedKeys().length}개 테이블 선택됨`
+          : '테이블을 선택하세요';
+    layoutExportHelp.textContent = all
+        ? '같은 레포의 모든 브랜치에서 사용하는 작업 데이터입니다.'
+        : '배치만 공유하며 컬럼·관계는 포함하지 않습니다.';
+    setLayoutStatus('');
+    syncLayoutSelectionMode();
+}
+for (const input of layoutScopeInputs)
+    input.addEventListener('change', updateLayoutExportScope);
+for (const [index, tab] of layoutTabs.entries()) {
+    tab.addEventListener('click', () => switchLayoutTab(tab.dataset.layoutTab));
+    tab.addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
+            return;
+        event.preventDefault();
+        const next =
+            event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? layoutTabs.length - 1
+                  : (index +
+                        (event.key === 'ArrowRight' ? 1 : -1) +
+                        layoutTabs.length) %
+                    layoutTabs.length;
+        if (!layoutTabs[next].disabled) {
+            switchLayoutTab(layoutTabs[next].dataset.layoutTab);
+            layoutTabs[next].focus();
+        }
+    });
+}
+layoutPanel.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !layoutIsBusy) {
+        event.stopPropagation();
+        closeLayoutPanel();
+    }
+});
 if (layoutButton) {
-    layoutButton.onclick = () => {
+    layoutButton.onclick = async () => {
         pendingLayoutPackage = undefined;
         layoutApply.hidden = true;
         layoutFile.value = '';
         layoutSourceText.textContent = currentLayoutSource
-            ? `레포 공통 작업 데이터 · ${currentLayoutSource.repositoryUrl}`
+            ? currentLayoutSource.repositoryUrl
+                  .replace(/^https:\/\/github\.com\//, '')
+                  .replace(/\.git\/?$/, '')
             : '현재 ERD의 출처 정보를 확인하지 못했습니다.';
-        setLayoutStatus('내보내거나 전달받은 JSON 파일을 선택하세요.');
+        layoutSourceText.title = currentLayoutSource?.repositoryUrl ?? '';
+        const branchBadge = layoutPanel.querySelector('#erd-layout-branch');
+        branchBadge.querySelector('span').textContent =
+            currentSnapshot?.branch || '브랜치 정보 없음';
+        branchBadge.title = `현재 ERD 브랜치: ${currentSnapshot?.branch || '알 수 없음'}`;
+        if (!layoutPanel.classList.contains('visible'))
+            layoutPreviousFocus = document.activeElement;
+        layoutRetry.hidden = true;
+        const editorHeader = document.querySelector('#root nav');
+        layoutPanel.style.top = `${Math.ceil(editorHeader?.getBoundingClientRect().bottom ?? 48) + 10}px`;
+        switchLayoutTab('export');
+        layoutScopeInputs[0].checked = true;
+        updateLayoutExportScope();
+        layoutPreview.hidden = true;
+        layoutImport.querySelector('strong').textContent = 'JSON 파일 선택';
         refreshLayoutRestore();
         layoutPanel.classList.add('visible');
+        layoutPanel.querySelector('[role=dialog]').focus();
+        layoutAcceptCanvasSelection = false;
+        layoutSelectionSignature = undefined;
+        layoutBusy(true);
+        try {
+            const diagramId = currentDiagramId();
+            const catalog = await layoutTableCatalog(
+                diagramId,
+                currentLayoutSource
+            );
+            layoutPicker.load(catalog.tables, {
+                currentTableKeys: catalog.currentTableKeys,
+                preserveSelection: layoutLastDiagram === diagramId,
+            });
+            layoutLastDiagram = diagramId;
+            // Adopt the existing canvas selection when the panel is opened.
+            layoutAcceptCanvasSelection = true;
+            sendLayoutSelection({ read: true });
+        } catch (error) {
+            setLayoutStatus(
+                error.name === 'AbortError'
+                    ? '테이블 목록을 불러오지 못했습니다. 다시 시도해 주세요.'
+                    : error.message,
+                'error'
+            );
+            layoutRetry.hidden = false;
+        } finally {
+            layoutBusy(false);
+        }
     };
-    layoutClose.onclick = () => layoutPanel.classList.remove('visible');
-    layoutPanel.onclick = (event) => {
-        if (event.target === layoutPanel)
-            layoutPanel.classList.remove('visible');
-    };
+    layoutRetry.onclick = () => layoutButton.onclick();
+    layoutClose.onclick = closeLayoutPanel;
     layoutExport.onclick = async () => {
         if (!currentLayoutSource) return;
         layoutBusy(true);
@@ -392,10 +746,34 @@ if (layoutButton) {
             layoutBusy(false);
         }
     };
+    layoutExportSelected.onclick = async () => {
+        if (!currentLayoutSource || !layoutPicker.selectedKeys().length) return;
+        layoutBusy(true);
+        setLayoutStatus('선택한 테이블 배치를 읽는 중…');
+        try {
+            const layoutPackage = await exportLayoutPackage(
+                currentDiagramId(),
+                currentLayoutSource,
+                {
+                    tableKeys: layoutPicker.selectedKeys(),
+                }
+            );
+            downloadLayout(layoutPackage);
+            setLayoutStatus(
+                `부분 내보내기 완료 · 테이블 ${layoutPackage.layout.tables.length}개 · 테이블 이름·스키마명과 배치만 포함`,
+                'success'
+            );
+        } catch (error) {
+            setLayoutStatus(error.message, 'error');
+        } finally {
+            layoutBusy(false);
+        }
+    };
     layoutImport.onclick = () => layoutFile.click();
     layoutFile.onchange = async () => {
         pendingLayoutPackage = undefined;
         layoutApply.hidden = true;
+        layoutPreview.hidden = true;
         const file = layoutFile.files?.[0];
         if (!file || !currentLayoutSource) return;
         if (file.size > 5 * 1024 * 1024) {
@@ -417,13 +795,37 @@ if (layoutButton) {
                 throw new Error(
                     `현재 ERD와 레포가 다릅니다. 출처: ${compatibility.repository.url}`
                 );
+            const preview = await previewLayoutPackage(
+                currentDiagramId(),
+                currentLayoutSource,
+                layoutPackage
+            );
             pendingLayoutPackage = layoutPackage;
-            layoutApply.hidden = false;
+            layoutApply.hidden = preview.partial && preview.matchedTables === 0;
+            layoutApply.textContent = preview.partial
+                ? `${preview.matchedTables}개 테이블에 적용`
+                : '전체 배치 적용';
+            layoutPanel.querySelector('#erd-layout-file-name').textContent =
+                file.name ?? '배치 JSON';
+            layoutPanel.querySelector('#erd-layout-import-kind').textContent =
+                preview.partial ? '선택 테이블 배치' : '전체 작업 데이터';
+            layoutPanel.querySelector('#erd-layout-count-total').textContent =
+                String(preview.counts.tables);
+            layoutPanel.querySelector('#erd-layout-count-matched').textContent =
+                String(preview.matchedTables);
+            layoutPanel.querySelector('#erd-layout-count-skipped').textContent =
+                String(preview.skippedTables);
+            layoutPanel.querySelector('#erd-layout-import-help').textContent =
+                preview.partial
+                    ? '일치하는 테이블의 배치만 적용합니다. 다른 테이블과 Area·메모·기존 Area 소속은 유지합니다. 같은 레포의 다른 브랜치에도 배치가 반영됩니다.'
+                    : `테이블 배치와 Area ${preview.counts.areas}개·메모 ${preview.counts.notes}개를 적용합니다. 같은 레포의 모든 브랜치에서 공유합니다.`;
+            layoutPreview.hidden = false;
+            layoutImport.querySelector('strong').textContent =
+                '다른 JSON 파일 선택';
             setLayoutStatus(
-                compatibility.compatible
-                    ? `적용 가능 · 같은 레포의 모든 브랜치가 같은 이름의 테이블 배치·색상과 Area·메모를 공유합니다. · 테이블 ${compatibility.counts.tables}개 · Area ${compatibility.counts.areas}개 · 메모 ${compatibility.counts.notes}개`
-                    : `현재 ERD와 레포가 다릅니다.`,
-                'success'
+                preview.partial && !preview.matchedTables
+                    ? '현재 ERD에 적용할 테이블이 없습니다. 다른 파일이나 ERD를 선택하세요.'
+                    : ''
             );
         } catch (error) {
             setLayoutStatus(
@@ -447,7 +849,9 @@ if (layoutButton) {
                 pendingLayoutPackage
             );
             setLayoutStatus(
-                `적용 완료 · 테이블 ${result.matchedTables}개 · Area ${result.areas}개 · 메모 ${result.notes}개`,
+                isPartialLayoutPackage(pendingLayoutPackage)
+                    ? `부분 적용 완료 · 테이블 ${result.matchedTables}개 · 건너뜀 ${result.skippedTables}개 · 나머지 작업 데이터 유지`
+                    : `적용 완료 · 테이블 ${result.matchedTables}개 · Area ${result.areas}개 · 메모 ${result.notes}개`,
                 'success'
             );
             await finishLayoutRefresh('새 ERD 작업 데이터를 표시하는 중…');

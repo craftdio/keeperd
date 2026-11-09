@@ -1,0 +1,52 @@
+/* Share targets are transient decorations; database colors remain visible. */
+.layout-share-mode.layout-share-has-targets
+    .react-flow__node-table:not(.layout-share-target) {
+    opacity: 0.4;
+}
+.layout-share-mode.layout-share-has-targets .react-flow__edges {
+    opacity: 0.25;
+}
+.layout-share-mode .react-flow__node-table {
+    transition: opacity 120ms;
+}
+.layout-share-target {
+    outline: calc(2px / var(--layout-share-zoom, 1)) solid #b8a4ff !important;
+    outline-offset: calc(4px / var(--layout-share-zoom, 1));
+    box-shadow: 0 0 calc(12px / var(--layout-share-zoom, 1)) #a78bfa55;
+}
+.layout-share-target::after {
+    content: '✓ 공유';
+    position: absolute;
+    top: calc(-12px / var(--layout-share-zoom, 1));
+    right: 0;
+    z-index: 100;
+    transform: scale(calc(1 / var(--layout-share-zoom, 1)));
+    transform-origin: top right;
+    padding: 2px 7px;
+    border: 1px solid #d9cdff;
+    border-radius: 5px;
+    background: #b8a4ff;
+    color: #211637;
+    font: 600 11px/16px system-ui;
+    white-space: nowrap;
+    pointer-events: none;
+}
+#canvas[data-table-lod='overview'] .layout-share-target::after {
+    content: '✓';
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border-radius: 50%;
+    text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+    .layout-share-mode .react-flow__node-table {
+        transition: none;
+    }
+}
+
+/* Keep the canvas targets visible beside the sharing panel. Closing the panel
+   restores the toolbar immediately, before the opener receives focus again. */
+body:has(#erd-layout-panel.visible):has(.layout-share-mode) #erd-sync {
+    visibility: hidden;
+}

@@ -27,6 +27,47 @@ async function client() {
     delete globalThis[Symbol.for('keeperd.workspace-client')];
     return import('./workspace-client.js');
 }
+
+it('continues saving after all tables in a partial restore have been removed', async () => {
+    const api = await client();
+    await api.readWorkspace();
+    await api.writeWorkspace('applyTableLayout', {
+        id: diagram.id,
+        package: {
+            format: 'keeperd-table-layout',
+            version: 1,
+            repository: { url: 'https://github.com/example/backend' },
+            layout: {
+                tables: [
+                    {
+                        schema: null,
+                        name: 'users',
+                        x: 500,
+                        y: 20,
+                        color: 'green',
+                        width: null,
+                        expanded: null,
+                        order: null,
+                    },
+                ],
+            },
+        },
+    });
+    const backupId = fixture.store
+        .view()
+        .backups.find((b) => b.kind === 'layout-partial').id;
+    await api.writeWorkspace('deleteTable', { id: 'users' });
+    const before = fixture.store.view();
+    await expect(
+        api.writeWorkspace('restoreTableLayout', { id: diagram.id, backupId })
+    ).resolves.toBeUndefined();
+    expect(fixture.store.view()).toEqual(before);
+    await expect(
+        api.writeWorkspace('updateConfig', { selectedTab: 'tables' })
+    ).resolves.toBeUndefined();
+    expect((await api.readWorkspace()).config.selectedTab).toBe('tables');
+    expect(fixture.store.view().diagrams[0].tables).toEqual([]);
+});
 beforeEach(() => {
     fixture = sqliteWorkspaceFixture();
     fixture.store.syncSnapshots({

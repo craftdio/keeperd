@@ -938,6 +938,8 @@ const server = createServer(async (req, res) => {
                 '/workspace-client.js',
                 '/browser-migration.js',
                 '/layout-transfer.js',
+                '/layout-package.js',
+                '/layout-table-picker.js',
             ].includes(url.pathname)
         ) {
             res.writeHead(200, {

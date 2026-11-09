@@ -1,4 +1,12 @@
 import {
+    isPartialLayoutPackage,
+    layoutMatchCounts,
+    parseLayoutPackage,
+    selectLayoutTables,
+    tableKey,
+} from './layout-package.js';
+export { parseLayoutPackage } from './layout-package.js';
+import {
     readWorkspace,
     writeWorkspace,
     workspaceBackup,
@@ -6,17 +14,13 @@ import {
 const FORMAT = 'keeperd-repository-layout';
 const VERSION = 1;
 const BACKUP_PREFIX = 'debut-layout-backup:';
-const MAX_TABLES = 10000;
-const MAX_AREAS = 1000;
-const MAX_NOTES = 1000;
 
 const canonicalRepository = (url) =>
     String(url ?? '')
         .toLowerCase()
-        .replace(/\.git$/, '');
-const tableKey = (table) => `${table.schema ?? ''}\u0000${table.name}`;
+        .replace(/\.git\/?$/, '')
+        .replace(/\/$/, '');
 const finite = (value) => typeof value === 'number' && Number.isFinite(value);
-const nullableFinite = (value) => value === null || finite(value);
 function sourceOf(snapshot, primaryUrl = '') {
     const revision = snapshot?.revision ?? '';
     return {
@@ -59,103 +63,6 @@ function validateSource(source) {
         throw new Error('작업 데이터 JSON의 출처 정보가 올바르지 않습니다.');
 }
 
-function validateRepository(repository) {
-    if (
-        !repository ||
-        typeof repository.url !== 'string' ||
-        !canonicalRepository(repository.url)
-    )
-        throw new Error('작업 데이터 JSON의 레포 정보가 올바르지 않습니다.');
-}
-
-function validateLayout(layout) {
-    if (
-        !layout ||
-        !Array.isArray(layout.tables) ||
-        !Array.isArray(layout.areas) ||
-        !Array.isArray(layout.notes) ||
-        layout.tables.length > MAX_TABLES ||
-        layout.areas.length > MAX_AREAS ||
-        layout.notes.length > MAX_NOTES
-    )
-        throw new Error('작업 데이터 JSON의 항목 수가 올바르지 않습니다.');
-    const tableKeys = new Set();
-    for (const table of layout.tables) {
-        if (
-            !table ||
-            (table.schema !== null &&
-                table.schema !== undefined &&
-                typeof table.schema !== 'string') ||
-            typeof table.name !== 'string' ||
-            !table.name ||
-            !finite(table.x) ||
-            !finite(table.y) ||
-            typeof table.color !== 'string' ||
-            !nullableFinite(table.width) ||
-            (table.expanded !== null && typeof table.expanded !== 'boolean') ||
-            !nullableFinite(table.order) ||
-            (table.parentAreaKey !== null &&
-                typeof table.parentAreaKey !== 'string')
-        )
-            throw new Error(
-                '작업 데이터 JSON의 테이블 배치가 올바르지 않습니다.'
-            );
-        const key = tableKey(table);
-        if (tableKeys.has(key))
-            throw new Error('작업 데이터 JSON에 중복 테이블이 있습니다.');
-        tableKeys.add(key);
-    }
-    const areaKeys = new Set();
-    for (const area of layout.areas) {
-        if (
-            !area ||
-            typeof area.key !== 'string' ||
-            !area.key ||
-            typeof area.name !== 'string' ||
-            !finite(area.x) ||
-            !finite(area.y) ||
-            !finite(area.width) ||
-            !finite(area.height) ||
-            typeof area.color !== 'string' ||
-            !nullableFinite(area.order) ||
-            areaKeys.has(area.key)
-        )
-            throw new Error(
-                '작업 데이터 JSON의 Area 정보가 올바르지 않습니다.'
-            );
-        areaKeys.add(area.key);
-    }
-    for (const note of layout.notes)
-        if (
-            !note ||
-            typeof note.content !== 'string' ||
-            note.content.length > 100000 ||
-            !finite(note.x) ||
-            !finite(note.y) ||
-            !finite(note.width) ||
-            !finite(note.height) ||
-            typeof note.color !== 'string' ||
-            !nullableFinite(note.order)
-        )
-            throw new Error(
-                '작업 데이터 JSON의 메모 정보가 올바르지 않습니다.'
-            );
-    for (const table of layout.tables)
-        if (table.parentAreaKey !== null && !areaKeys.has(table.parentAreaKey))
-            throw new Error(
-                '작업 데이터 JSON의 테이블 Area 연결이 올바르지 않습니다.'
-            );
-}
-
-export function parseLayoutPackage(value) {
-    const input = typeof value === 'string' ? JSON.parse(value) : value;
-    if (input?.format !== FORMAT || input?.version !== VERSION)
-        throw new Error('지원하지 않는 작업 데이터 JSON 형식입니다.');
-    validateRepository(input.repository);
-    validateLayout(input.layout);
-    return input;
-}
-
 export function checkLayoutCompatibility(input, targetSource) {
     const layoutPackage = parseLayoutPackage(input);
     validateSource(targetSource);
@@ -167,8 +74,8 @@ export function checkLayoutCompatibility(input, targetSource) {
         sameRepository,
         counts: {
             tables: layoutPackage.layout.tables.length,
-            areas: layoutPackage.layout.areas.length,
-            notes: layoutPackage.layout.notes.length,
+            areas: layoutPackage.layout.areas?.length ?? 0,
+            notes: layoutPackage.layout.notes?.length ?? 0,
         },
         repository: layoutPackage.repository,
     };
@@ -280,21 +187,66 @@ function createRepositoryPackage(source, stored) {
     });
 }
 
-export async function exportLayoutPackage(diagramId, source) {
-    const state = await readWorkspace({ refresh: true });
+function diagramLayoutPackage(state, diagramId, source) {
     const diagram = state.diagrams.find((item) => item.id === diagramId);
     if (!diagram) throw new Error('현재 ERD 작업 데이터를 찾을 수 없습니다.');
     const stored = state.layouts.find(
         (item) => item.id === canonicalRepository(source.repositoryUrl)
     );
-    return stored?.version === 2
-        ? createRepositoryPackage(source, stored)
-        : createPackage(source, {
-              diagram,
-              tables: diagram.tables ?? [],
-              areas: diagram.areas ?? [],
-              notes: diagram.notes ?? [],
-          });
+    const layoutPackage =
+        stored?.version === 2
+            ? createRepositoryPackage(source, stored)
+            : createPackage(source, {
+                  diagram,
+                  tables: diagram.tables ?? [],
+                  areas: diagram.areas ?? [],
+                  notes: diagram.notes ?? [],
+              });
+    return { diagram, layoutPackage };
+}
+
+export async function layoutTableCatalog(diagramId, source) {
+    const state = await readWorkspace({ refresh: true });
+    const { diagram, layoutPackage } = diagramLayoutPackage(
+        state,
+        diagramId,
+        source
+    );
+    return {
+        tables: layoutPackage.layout.tables.filter((table) =>
+            (diagram.tables ?? []).some(
+                (current) => tableKey(current) === tableKey(table)
+            )
+        ),
+        currentTableKeys: (diagram.tables ?? []).map(tableKey),
+    };
+}
+
+export async function exportLayoutPackage(
+    diagramId,
+    source,
+    { tableKeys } = {}
+) {
+    const state = await readWorkspace({ refresh: true });
+    const { layoutPackage } = diagramLayoutPackage(state, diagramId, source);
+    return tableKeys === undefined
+        ? layoutPackage
+        : selectLayoutTables(layoutPackage, tableKeys);
+}
+
+export async function previewLayoutPackage(diagramId, targetSource, input) {
+    const layoutPackage = parseLayoutPackage(input);
+    const compatibility = checkLayoutCompatibility(layoutPackage, targetSource);
+    if (!compatibility.compatible)
+        throw new Error('현재 ERD와 레포가 다릅니다.');
+    const state = await readWorkspace({ refresh: true });
+    const diagram = state.diagrams.find((item) => item.id === diagramId);
+    if (!diagram) throw new Error('현재 ERD 작업 데이터를 찾을 수 없습니다.');
+    return {
+        ...compatibility,
+        ...layoutMatchCounts(layoutPackage, diagram),
+        partial: isPartialLayoutPackage(layoutPackage),
+    };
 }
 
 const id = (prefix) =>
@@ -313,6 +265,15 @@ export async function applyLayoutPackage(
     const state = await readWorkspace({ refresh: true });
     const diagram = state.diagrams.find((item) => item.id === diagramId);
     if (!diagram) throw new Error('현재 ERD 작업 데이터를 찾을 수 없습니다.');
+    if (isPartialLayoutPackage(layoutPackage)) {
+        const counts = layoutMatchCounts(layoutPackage, diagram);
+        if (counts.matchedTables)
+            await writeWorkspace('applyTableLayout', {
+                id: diagramId,
+                package: layoutPackage,
+            });
+        return { ...counts, areas: 0, notes: 0 };
+    }
     const current = {
         diagram,
         tables: diagram.tables ?? [],
@@ -382,7 +343,8 @@ export async function hasLayoutBackup(diagramId) {
         (item) =>
             item.diagramId === diagramId &&
             (item.kind === 'layout' ||
-                item.kind === `${BACKUP_PREFIX}${diagramId}`)
+                item.kind === `${BACKUP_PREFIX}${diagramId}` ||
+                item.kind === 'layout-partial')
     );
 }
 
@@ -392,10 +354,28 @@ export async function restoreLayoutBackup(diagramId, targetSource) {
         (item) =>
             item.diagramId === diagramId &&
             (item.kind === 'layout' ||
-                item.kind === `${BACKUP_PREFIX}${diagramId}`)
+                item.kind === `${BACKUP_PREFIX}${diagramId}` ||
+                item.kind === 'layout-partial')
     );
     if (!backup) throw new Error('되돌릴 작업 데이터 백업이 없습니다.');
     const value = await workspaceBackup(backup.id);
+    if (backup.kind === 'layout-partial') {
+        const preview = await previewLayoutPackage(
+            diagramId,
+            targetSource,
+            value
+        );
+        await writeWorkspace('restoreTableLayout', {
+            id: diagramId,
+            backupId: backup.id,
+        });
+        return {
+            matchedTables: preview.matchedTables,
+            skippedTables: preview.skippedTables,
+            areas: 0,
+            notes: 0,
+        };
+    }
     if (value.format === FORMAT)
         return applyLayoutPackage(diagramId, targetSource, value, {
             createBackup: false,

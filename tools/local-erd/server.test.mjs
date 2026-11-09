@@ -38,6 +38,8 @@ test(
                 'server.mjs',
                 'node-runtime.mjs',
                 'workspace-store.mjs',
+                'layout-package.js',
+                'layout-table-picker.js',
                 'branches.mjs',
                 'folder-picker.mjs',
                 'library-store.mjs',
@@ -120,6 +122,23 @@ test(
                 );
             });
             const base = `http://localhost:${new URL(listeningUrl).port}`;
+            // Browser module imports must be served as JavaScript, never the
+            // editor HTML fallback, by the actual packaged server route.
+            for (const file of [
+                'layout-package.js',
+                'layout-table-picker.js',
+            ]) {
+                const response = await fetch(`${base}/${file}`);
+                assert.equal(response.status, 200);
+                assert.match(
+                    response.headers.get('content-type'),
+                    /javascript/
+                );
+                assert.equal(
+                    await response.text(),
+                    readFileSync(new URL(file, import.meta.url), 'utf8')
+                );
+            }
             // The server is authoritative across independent browser requests.
             assert.equal(
                 (await fetch(`${base}/data/%2e%2e%2fkeeperd.sqlite`)).status,

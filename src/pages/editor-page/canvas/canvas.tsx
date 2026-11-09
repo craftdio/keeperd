@@ -117,6 +117,8 @@ import {
 } from '@/lib/utils/area-utils';
 import { CanvasFilter } from './canvas-filter/canvas-filter';
 import { SelectedTableColors } from './selected-table-colors';
+import { useLayoutShareSelection } from './use-layout-share-selection';
+import './layout-share-selection.css';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { ShowAllButton } from './show-all-button';
 import { useIsLostInCanvas } from './hooks/use-is-lost-in-canvas';
@@ -297,7 +299,12 @@ export interface CanvasProps {
 export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
     const settleChanges = useRef(settledNodeChanges());
     const resizingNodes = useRef(new Set<string>());
-    const { getEdge, getInternalNode, getNode } = useReactFlow();
+    const {
+        getEdge,
+        getInternalNode,
+        getNode,
+        fitView: fitSelection,
+    } = useReactFlow();
     const updateNodeInternals = useUpdateNodeInternals();
     const [selectedTableIds, setSelectedTableIds] = useState<string[]>([]);
     const [selectedRelationshipIds, setSelectedRelationshipIds] = useState<
@@ -307,6 +314,7 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
     const { t } = useTranslation();
     const { isLostInCanvas } = useIsLostInCanvas();
     const {
+        diagramId,
         tables,
         areas,
         notes,
@@ -377,6 +385,13 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
             })
         )
     );
+    const layoutShareSelection = useLayoutShareSelection({
+        diagramId,
+        tables,
+        nodes,
+        setNodes,
+        fitView: fitSelection,
+    });
     const [edges, setEdges, onEdgesChange] =
         useEdgesState<EdgeType>(initialEdges);
     const edgeHighlightIndex = useMemo(
@@ -1671,6 +1686,10 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
         const container = containerRef.current;
         if (!container) return;
 
+        container.style.setProperty(
+            '--layout-share-zoom',
+            String(Math.max(zoom, 0.1))
+        );
         const next = getTableLevelOfDetail(zoom);
         if (tableLODRef.current !== next) {
             tableLODRef.current = next;
@@ -1843,6 +1862,12 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
         ]
     );
 
+    const decorateLayoutShareNodes = layoutShareSelection.decorateNodes;
+    const displayedNodes = useMemo(
+        () => decorateLayoutShareNodes(nodesWithCursor),
+        [decorateLayoutShareNodes, nodesWithCursor]
+    );
+
     return (
         <CanvasContextMenu>
             <div
@@ -1851,6 +1876,8 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                 ref={containerRef}
                 data-table-lod={tableLOD}
                 onMouseMove={handleMouseMove}
+                onPointerDownCapture={layoutShareSelection.capturePointerDown}
+                onKeyDownCapture={layoutShareSelection.captureKeyDown}
             >
                 <TableLODContext.Provider value={tableLOD}>
                     <ReactFlow
@@ -1859,8 +1886,12 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                         className={cn('nodes-animated', {
                             'canvas-cursor-multi-select': shiftPressed,
                             'canvas-cursor-default': !shiftPressed,
+                            'layout-share-mode': layoutShareSelection.active,
+                            'layout-share-has-targets':
+                                layoutShareSelection.hasTargets,
                         })}
-                        nodes={nodesWithCursor}
+                        nodes={displayedNodes}
+                        onNodeClick={layoutShareSelection.onNodeClick}
                         edges={edgesWithFloating}
                         onNodesChange={onNodesChangeHandler}
                         onEdgesChange={onEdgesChangeHandler}
@@ -2011,7 +2042,9 @@ export const Canvas: React.FC<CanvasProps> = ({ initialTables }) => {
                             </Controls>
                         ) : null}
 
-                        {!readonly && selectedColorTableIds.length > 0 ? (
+                        {!readonly &&
+                        !layoutShareSelection.active &&
+                        selectedColorTableIds.length > 0 ? (
                             <ViewportCenteredControls
                                 desktop={isDesktop}
                                 position="bottom-center"
