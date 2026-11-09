@@ -52,7 +52,7 @@ Turn versioned schemas into ERDs. Sync GitHub or local branches, compare changes
 | Schema Diff       | Highlight added or changed tables and fields.                          |
 | Persistent Layout | Keep table positions, sizes, colors, Areas, and notes across branches. |
 | Local Storage     | Share one local workspace across browsers and profiles.                |
-| Layout Sharing    | Share table layouts, Areas, and notes within the same repository.      |
+| Layout Sharing    | Share all or selected table layouts within the same repository.        |
 
 <a id="how-to-get-started"></a>
 
